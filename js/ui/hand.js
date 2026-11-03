@@ -91,6 +91,7 @@ function buildCardSurface(card, compact, tag) {
  * @param {boolean} [options.interactive]
  * @param {boolean | undefined} [options.legal]
  * @param {((card: Card) => void) | null} [options.onSelect]
+ * @param {(() => void) | null} [options.onIllegal]
  * @returns {HTMLElement}
  */
 export function createCard(cardLike, options = {}) {
@@ -99,14 +100,19 @@ export function createCard(cardLike, options = {}) {
     interactive = false,
     legal,
     onSelect = null,
+    onIllegal = null,
   } = options;
   const card = resolveCard(cardLike);
   const label = getCardLabel(card);
+  const statusLabel = legal === false
+    ? 'Сейчас играть нельзя'
+    : (legal === true ? 'Можно сыграть' : null);
+  const accessibleLabel = statusLabel ? `${label}. ${statusLabel}` : label;
   const surface = buildCardSurface(card, compact, interactive ? 'button' : 'div');
 
   surface.classList.add('card--surface');
-  surface.setAttribute('title', label);
-  surface.setAttribute('aria-label', label);
+  surface.setAttribute('title', accessibleLabel);
+  surface.setAttribute('aria-label', accessibleLabel);
 
   if (interactive) {
     surface.setAttribute('type', 'button');
@@ -117,12 +123,15 @@ export function createCard(cardLike, options = {}) {
     } else if (legal === false) {
       surface.classList.add('card--illegal');
       surface.setAttribute('aria-disabled', 'true');
+      surface.tabIndex = -1;
     }
 
     if (typeof onSelect === 'function') {
       surface.addEventListener('click', () => {
         if (legal !== false) {
           onSelect(card);
+        } else {
+          onIllegal?.();
         }
       });
     }
@@ -175,6 +184,7 @@ export function createOpponentHand(cardCount) {
  * @param {string} elements.playerId
  * @param {((card: Card) => void) | null} [elements.onCardSelect]
  * @param {ReadonlyArray<string> | null} [elements.legalCardIds]
+ * @param {(() => void) | null} [elements.onIllegalCard]
  */
 export function renderHand(state, elements) {
   const {
@@ -182,8 +192,13 @@ export function renderHand(state, elements) {
     playerId,
     onCardSelect = null,
     legalCardIds = null,
+    onIllegalCard = null,
   } = elements;
   const player = state.players.find((entry) => entry.id === playerId);
+  const previousCards = handEl.querySelector('.hand__cards');
+  const previousScrollLeft = previousCards instanceof HTMLElement
+    ? previousCards.scrollLeft
+    : 0;
 
   clearElement(handEl);
 
@@ -223,9 +238,11 @@ export function renderHand(state, elements) {
         interactive,
         legal: legalSet === null ? undefined : legalSet.has(card.id),
         onSelect: onCardSelect,
+        onIllegal: onIllegalCard,
       }),
     );
   }
 
   handEl.append(cardsEl);
+  cardsEl.scrollLeft = previousScrollLeft;
 }

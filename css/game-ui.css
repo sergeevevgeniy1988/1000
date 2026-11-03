@@ -38,6 +38,11 @@
   font-weight: 600;
 }
 
+.action-bar:focus-visible {
+  outline: 2px solid rgba(245, 215, 140, 0.45);
+  outline-offset: 2px;
+}
+
 /* Bidding */
 
 .bidding-controls {
@@ -183,6 +188,13 @@
   transform: translateY(-1px);
 }
 
+.marriage-option:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+  border-color: rgba(229, 185, 92, 0.65);
+  background: rgba(229, 185, 92, 0.12);
+}
+
 .marriage-option__suit {
   font-size: 0.95rem;
 }
@@ -276,6 +288,15 @@ body.has-modal {
   color: var(--color-text);
   border-color: rgba(229, 185, 92, 0.5);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.modal__close:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.modal:focus {
+  outline: none;
 }
 
 .modal__body {
@@ -704,6 +725,12 @@ body.has-modal {
   border-color: rgba(229, 185, 92, 0.5);
 }
 
+.gift-slot:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+  border-color: rgba(229, 185, 92, 0.7);
+}
+
 .gift-slot--active {
   border-style: solid;
   border-color: rgba(229, 185, 92, 0.75);
@@ -828,6 +855,7 @@ body.has-modal {
 }
 
 .is-dealing .hand__cards .card {
+  will-change: transform, opacity;
   animation: deal-card-in 420ms cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
 
@@ -864,6 +892,7 @@ body.has-modal {
 }
 
 .card--played-now {
+  will-change: transform, opacity;
   animation: played-card-in 230ms ease-out;
 }
 
@@ -878,6 +907,7 @@ body.has-modal {
 }
 
 .trick--collecting .trick-slot .card {
+  will-change: transform, opacity;
   animation: trick-card-collect 720ms cubic-bezier(0.5, 0, 0.8, 0.35) forwards;
 }
 

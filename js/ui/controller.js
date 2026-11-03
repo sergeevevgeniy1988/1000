@@ -1,11 +1,14 @@
-import { GAME_EVENTS, PHASES, TARGET_SCORE } from '../core/constants.js';
+import { BIDDING, GAME_EVENTS, PHASES, TARGET_SCORE } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
 import { Game } from '../core/game.js';
 import { mulberry32 } from '../core/rng.js';
 import { getLegalCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { clearElement, createElement } from './dom.js';
-import { formatCards, nameGenitive } from './format.js';
+import { formatCards, getPhaseName, nameGenitive } from './format.js';
+import { createAnnouncer, getPhaseAnnouncement } from './announcements.js';
+import { getActionErrorMessage } from './errors.js';
+import { captureFocus, focusFirstLegalCard, restoreFocus } from './focus.js';
 import { renderHand } from './hand.js';
 import { renderLog, resetLog } from './log.js';
 import { renderTable } from './table.js';
@@ -63,6 +66,8 @@ export class Controller {
   #bubbles = new Map();
   #marriageMenuOpen = false;
   #newGameHandler = null;
+  #announcer = null;
+  #renderToken = 0;
 
   /**
    * @param {object} options
@@ -82,6 +87,8 @@ export class Controller {
    * @param {HTMLElement} options.elements.targetScore
    * @param {HTMLElement} options.elements.dealNumber
    * @param {HTMLButtonElement | null} [options.elements.newGameButton]
+   * @param {HTMLElement | null} [options.elements.announcer]
+   * @param {{ close: (options?: { restoreFocus?: boolean }) => void } | null} [options.elements.logDrawer]
    */
   constructor({ players, humanId, seed = null, targetScore = TARGET_SCORE, elements }) {
     this.#players = players.map((player) => Object.freeze({ ...player }));
@@ -89,6 +96,7 @@ export class Controller {
     this.#seed = seed === null || !Number.isFinite(seed) ? null : seed >>> 0;
     this.#targetScore = targetScore;
     this.#elements = elements;
+    this.#announcer = createAnnouncer(elements.announcer ?? null);
 
     this.#newGameHandler = () => this.requestNewGame();
 
@@ -121,6 +129,7 @@ export class Controller {
    */
   newGame() {
     this.#clearTimers();
+    this.#renderToken += 1;
     this.#paused = false;
     this.#aiBusy = false;
     this.#trickReveal = null;
@@ -129,6 +138,8 @@ export class Controller {
     this.#lastPlayedCardId = null;
     closeModal({ silent: true });
     cancelAnimations(this.#elements.board, this.#elements.tableCenter);
+    this.#elements.logDrawer?.close({ restoreFocus: false });
+    this.#announcer?.reset();
     resetLog(this.#elements.gameLog);
     resetToasts();
 
@@ -210,6 +221,7 @@ export class Controller {
    */
   dispose() {
     this.#clearTimers();
+    this.#renderToken += 1;
     this.#unsubscribeAll();
     closeModal({ silent: true });
 
@@ -290,9 +302,15 @@ export class Controller {
    * @returns {void}
    */
   #handleGameError(error) {
-    console.error('[1000]', error);
     playSound('error');
-    showToast(error?.message ?? 'Игровая ошибка.');
+
+    if (error && typeof error === 'object' && error.name === 'GameError') {
+      showToast(getActionErrorMessage(error));
+      return;
+    }
+
+    console.error('[1000]', error);
+    showToast('Не удалось выполнить действие. Попробуйте ещё раз.');
   }
 
   /**
@@ -392,6 +410,8 @@ export class Controller {
       ? { ...state, currentTrick: reveal.cards, currentPlayerId: null }
       : state;
     const animatedCardId = this.#lastPlayedCardId;
+    const focusSnapshot = captureFocus(this.#elements.board);
+    const renderToken = ++this.#renderToken;
     this.#lastPlayedCardId = null;
 
     renderTable(displayState, this.#elements, {
@@ -419,12 +439,66 @@ export class Controller {
       playerId: this.#humanId,
       legalCardIds,
       onCardSelect: legalCardIds ? (card) => this.#humanPlayCard(card) : null,
+      onIllegalCard: legalCardIds
+        ? () => showToast(getActionErrorMessage({ code: 'ILLEGAL_CARD' }), 'info')
+        : null,
     });
     renderLog(state, this.#elements.gameLog);
     this.#renderHeader(state);
     this.#renderActionBar(state, reveal);
 
+    if (focusSnapshot && !restoreFocus(this.#elements.board, focusSnapshot)) {
+      this.#applyFocusFallback();
+    }
+
+    if (focusSnapshot) {
+      // A click on a control that is replaced during the same event can move
+      // focus to <body> after the handler returns. Repair that on the next task,
+      // unless a modal legitimately took focus in the meantime.
+      window.setTimeout(() => {
+        if (
+          renderToken !== this.#renderToken
+          || getOpenModalKind() !== null
+          || !this.#elements.board.isConnected
+        ) {
+          return;
+        }
+
+        const active = document.activeElement;
+
+        if (active === document.body || !document.body.contains(active)) {
+          if (!restoreFocus(this.#elements.board, focusSnapshot)) {
+            this.#applyFocusFallback();
+          }
+        }
+      }, 0);
+    }
+
+    this.#announcer?.announce(getPhaseAnnouncement(state, {
+      humanId: this.#humanId,
+      reveal: reveal ? { winnerId: reveal.winnerId, points: reveal.points } : null,
+    }));
+
     document.body.dataset.phase = state.phase;
+  }
+
+  /**
+   * Moves focus to the marriage menu, the first legal card, or the action bar
+   * when the previous control disappeared after a re-render.
+   *
+   * @returns {void}
+   */
+  #applyFocusFallback() {
+    const menuOption = this.#elements.actionBar.querySelector('.marriage-option');
+
+    if (menuOption instanceof HTMLElement) {
+      menuOption.focus();
+      return;
+    }
+
+    if (!focusFirstLegalCard(this.#elements.board)) {
+      this.#elements.actionBar.focus({ preventScroll: true });
+    }
   }
 
   /**
@@ -455,7 +529,6 @@ export class Controller {
         createElement('span', {
           className: 'action-bar__status action-bar__status--result',
           text: `Взятка ${this.#trickReveal.points}: ${winner?.name ?? '—'}`,
-          attrs: { role: 'status' },
         }),
       ]));
       return;
@@ -480,7 +553,6 @@ export class Controller {
             text: declarer?.isHuman
               ? 'Выберите по одной карте для Алисы и Бориса в окне прикупа.'
               : `${declarer?.name ?? 'Играющий'} забирает прикуп и отдаёт карты…`,
-            attrs: { role: 'status' },
           }),
         ]));
         break;
@@ -495,7 +567,6 @@ export class Controller {
         group.append(createElement('span', {
           className: 'action-bar__status',
           text: statusText,
-          attrs: { role: 'status' },
         }));
 
         const marriages = this.#getHumanMarriages(state);
@@ -524,17 +595,19 @@ export class Controller {
         bar.append(createElement('span', {
           className: 'action-bar__status',
           text: 'Раздача завершена — итоги в окне результатов.',
-          attrs: { role: 'status' },
         }));
         break;
       case PHASES.GAME_OVER:
         bar.append(createElement('span', {
           className: 'action-bar__status action-bar__status--result',
           text: 'Игра окончена. Итоговая таблица открыта.',
-          attrs: { role: 'status' },
         }));
         break;
       default:
+        bar.append(createElement('span', {
+          className: 'action-bar__status',
+          text: `${getPhaseName(state.phase)}…`,
+        }));
         break;
     }
   }
@@ -707,6 +780,13 @@ export class Controller {
     }
 
     const kind = getOpenModalKind();
+    const mandatoryModal = (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
+      || state.phase === PHASES.DEAL_END
+      || state.phase === PHASES.GAME_OVER;
+
+    if (mandatoryModal) {
+      this.#elements.logDrawer?.close({ restoreFocus: false });
+    }
 
     if (state.phase === PHASES.GIVING && state.declarerId === this.#humanId) {
       if (kind !== 'prikup') {
@@ -815,27 +895,54 @@ export class Controller {
       switch (state.phase) {
         case PHASES.BIDDING: {
           const view = this.#game.getPlayerView(actor.id);
-          const amount = ai.chooseBid(view, state.currentBid);
+          let amount = null;
+
+          try {
+            amount = ai.chooseBid(view, state.currentBid);
+          } catch (error) {
+            console.error('[1000] AI не смог выбрать ставку:', error);
+          }
+
+          if (!isLegalBid(state, amount)) {
+            amount = getFallbackBid(state);
+          }
 
           this.#game.bid(actor.id, amount);
           break;
         }
         case PHASES.GIVING: {
           const view = this.#game.getPlayerView(actor.id);
-          const gifts = ai.chooseCardsToGive(view);
+          let gift = null;
 
-          if (gifts.length === 0) {
-            throw new Error('AI не выбрал карты для отдара.');
+          try {
+            const gifts = ai.chooseCardsToGive(view);
+            gift = Array.isArray(gifts) ? gifts[0] : null;
+          } catch (error) {
+            console.error('[1000] AI не смог выбрать отдар:', error);
           }
 
-          this.#game.giveCard(gifts[0].toPlayerId, gifts[0].cardId);
+          if (!isGiftFromView(view, actor.id, gift)) {
+            gift = getFallbackGift(view, actor.id);
+          }
+
+          if (!gift) {
+            throw new Error('Нет карты для отдара.');
+          }
+
+          this.#game.giveCard(gift.toPlayerId, gift.cardId);
           break;
         }
         case PHASES.PLAYING: {
           const view = this.#game.getPlayerView(actor.id);
 
           if (state.currentTrick.length === 0 && state.completedTricks.length >= 1) {
-            const suit = ai.chooseMarriage(view);
+            let suit = null;
+
+            try {
+              suit = ai.chooseMarriage(view);
+            } catch (error) {
+              console.error('[1000] AI не смог выбрать марьяж:', error);
+            }
 
             if (suit) {
               this.#game.declareMarriage(actor.id, suit);
@@ -843,7 +950,22 @@ export class Controller {
             }
           }
 
-          const card = ai.chooseCard(view, null);
+          const legalCards = this.#getLegalCardList(state, actor.id);
+          let card = null;
+
+          try {
+            card = ai.chooseCard(view, legalCards);
+          } catch (error) {
+            console.error('[1000] AI не смог выбрать карту:', error);
+          }
+
+          if (!card || !legalCards.some((legalCard) => legalCard.id === card.id)) {
+            card = legalCards[0] ?? null;
+          }
+
+          if (!card) {
+            throw new Error('Нет легальной карты для хода.');
+          }
 
           this.#game.playCard(actor.id, card.id);
           break;
@@ -857,6 +979,27 @@ export class Controller {
       this.#aiBusy = false;
       this.#scheduleAI();
     }
+  }
+
+  /**
+   * Returns the cards that the acting AI may legally play.
+   *
+   * @param {object} state
+   * @param {string} playerId
+   * @returns {import('../core/deck.js').Card[]}
+   */
+  #getLegalCardList(state, playerId) {
+    const player = state.players.find((entry) => entry.id === playerId);
+
+    if (!player || player.hand.length === 0) {
+      return [];
+    }
+
+    const leadSuit = state.currentTrick.length > 0
+      ? getCardById(state.currentTrick[0].cardId).suit
+      : null;
+
+    return getLegalCards(player.hand, leadSuit, state.trumpSuit);
   }
 
   /**
@@ -910,6 +1053,95 @@ export class Controller {
     this.#clearAITimer();
     this.#clearTrickReveal();
   }
+}
+
+/**
+ * @param {object} state
+ * @param {number | null} amount
+ * @returns {boolean}
+ */
+function isLegalBid(state, amount) {
+  if (amount === null) {
+    return state.currentBid > 0;
+  }
+
+  if (
+    typeof amount !== 'number'
+    || !Number.isInteger(amount)
+    || amount < BIDDING.MIN
+    || amount > BIDDING.MAX
+    || amount % BIDDING.STEP !== 0
+  ) {
+    return false;
+  }
+
+  if (state.currentBid === 0) {
+    return amount === BIDDING.MIN;
+  }
+
+  return amount >= state.currentBid + BIDDING.STEP;
+}
+
+/**
+ * @param {object} state
+ * @returns {number | null}
+ */
+function getFallbackBid(state) {
+  if (state.currentBid === 0) {
+    return BIDDING.MIN;
+  }
+
+  const next = state.currentBid + BIDDING.STEP;
+
+  return next <= BIDDING.MAX ? next : null;
+}
+
+/**
+ * @param {object} view
+ * @param {string} playerId
+ * @param {unknown} gift
+ * @returns {boolean}
+ */
+function isGiftFromView(view, playerId, gift) {
+  if (!gift || typeof gift !== 'object') {
+    return false;
+  }
+
+  const cardId = gift.cardId;
+  const toPlayerId = gift.toPlayerId;
+  const self = view.players.find((player) => player.id === playerId);
+  const target = view.players.find((player) => player.id === toPlayerId);
+
+  return Boolean(
+    self
+    && target
+    && target.id !== playerId
+    && self.hand.includes(cardId)
+    && !view.givenCards.some((entry) => entry.toId === toPlayerId),
+  );
+}
+
+/**
+ * Picks the first remaining opponent and the first unused card when the AI
+ * fails to return a legal gift.
+ *
+ * @param {object} view
+ * @param {string} playerId
+ * @returns {{ toPlayerId: string, cardId: string } | null}
+ */
+function getFallbackGift(view, playerId) {
+  const givenTo = new Set(view.givenCards.map((entry) => entry.toId));
+  const target = view.players.find((player) => player.id !== playerId && !givenTo.has(player.id));
+  const self = view.players.find((player) => player.id === playerId);
+
+  if (!target || !self) {
+    return null;
+  }
+
+  const givenCards = new Set(view.givenCards.map((entry) => entry.cardId));
+  const cardId = self.hand.find((id) => !givenCards.has(id));
+
+  return cardId ? { toPlayerId: target.id, cardId } : null;
 }
 
 /**

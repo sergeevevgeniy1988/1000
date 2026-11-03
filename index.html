@@ -36,6 +36,13 @@
       </div>
 
       <div class="app-header__actions">
+        <button
+          class="button button--ghost log-toggle"
+          type="button"
+          id="log-toggle"
+          aria-controls="game-log-panel"
+          aria-expanded="false"
+        >Журнал</button>
         <button class="button button--ghost" type="button" id="rules">Правила</button>
         <button class="button button--ghost" type="button" id="settings">Настройки</button>
         <button class="button" type="button" id="new-game">Новая игра</button>
@@ -47,14 +54,20 @@
         <div class="opponents" id="opponents"></div>
         <div class="table-center" id="table-center"></div>
         <div id="human-panel"></div>
-        <div class="action-bar" id="action-bar" aria-live="polite"></div>
+        <div class="action-bar" id="action-bar" tabindex="-1"></div>
         <section class="hand" id="hand" aria-label="Ваши карты"></section>
       </section>
 
-      <aside class="sidebar" aria-label="Журнал событий">
+      <aside class="sidebar" id="game-log-panel" aria-label="Журнал событий" tabindex="-1">
         <div class="sidebar__head">
           <h2 class="sidebar__title">Журнал</h2>
           <span class="sidebar__hint">Партия</span>
+          <button
+            class="sidebar__close"
+            type="button"
+            id="log-close"
+            aria-label="Закрыть журнал"
+          >×</button>
         </div>
         <div class="game-log" id="game-log" role="log" aria-live="polite" aria-relevant="additions"></div>
       </aside>
@@ -66,8 +79,10 @@
     </footer>
   </div>
 
+  <div class="sidebar-backdrop" id="log-backdrop" hidden></div>
   <div id="modal-root"></div>
   <div class="toast-root" id="toast-root" role="status" aria-live="polite"></div>
+  <div class="visually-hidden" id="game-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <noscript>
     <div class="noscript">Для игры нужен JavaScript. Включите его в настройках браузера.</div>

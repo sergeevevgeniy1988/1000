@@ -12,6 +12,22 @@ import {
 let currentModal = null;
 let modalCounter = 0;
 let toastCounter = 0;
+const toastTimers = new Set();
+
+/**
+ * Keeps the application behind a modal out of the tab order and away from
+ * screen readers. The modal root itself lives outside `.app`.
+ *
+ * @param {boolean} inert
+ * @returns {void}
+ */
+function setAppInert(inert) {
+  const app = document.querySelector('.app');
+
+  if (app instanceof HTMLElement) {
+    app.inert = inert;
+  }
+}
 
 /**
  * @typedef {object} ModalAction
@@ -72,6 +88,7 @@ export function closeModal({ silent = false } = {}) {
   document.removeEventListener('keydown', modal.onKeydown, true);
   modal.overlay.remove();
   document.body.classList.remove('has-modal');
+  setAppInert(false);
 
   if (!silent) {
     modal.onClose?.();
@@ -117,6 +134,7 @@ export function openModal({
 
   modalCounter += 1;
   const titleId = `modal-title-${modalCounter}`;
+  const subtitleId = subtitle ? `modal-subtitle-${modalCounter}` : null;
   const previousFocus = document.activeElement;
 
   const overlay = createElement('div', { className: 'modal-backdrop' });
@@ -126,6 +144,8 @@ export function openModal({
       role: 'dialog',
       'aria-modal': 'true',
       'aria-labelledby': titleId,
+      'aria-describedby': subtitleId,
+      tabindex: '-1',
     },
   });
   const header = createElement('div', { className: 'modal__header' });
@@ -139,7 +159,11 @@ export function openModal({
   heading.append(titleEl);
 
   if (subtitle) {
-    heading.append(createElement('p', { className: 'modal__subtitle', text: subtitle }));
+    heading.append(createElement('p', {
+      className: 'modal__subtitle',
+      text: subtitle,
+      attrs: { id: subtitleId },
+    }));
   }
 
   header.append(heading);
@@ -212,16 +236,21 @@ export function openModal({
 
     if (focusable.length === 0) {
       event.preventDefault();
+      dialog.focus({ preventScroll: true });
       return;
     }
 
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
 
-    if (event.shiftKey && document.activeElement === first) {
+    if (!dialog.contains(active)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && active === first) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (!event.shiftKey && active === last) {
       event.preventDefault();
       first.focus();
     }
@@ -235,6 +264,7 @@ export function openModal({
 
   root.append(overlay);
   document.body.classList.add('has-modal');
+  setAppInert(true);
   document.addEventListener('keydown', onKeydown, true);
 
   currentModal = {
@@ -285,13 +315,26 @@ export function showToast(message, variant = 'error') {
   root.append(toast);
 
   while (root.childElementCount > 3) {
-    root.firstElementChild?.remove();
+    const oldest = root.firstElementChild;
+
+    if (oldest) {
+      oldest.remove();
+    }
   }
 
-  window.setTimeout(() => {
+  const hideTimer = window.setTimeout(() => {
+    toastTimers.delete(hideTimer);
     toast.classList.add('toast--leaving');
-    window.setTimeout(() => toast.remove(), 220);
+
+    const removeTimer = window.setTimeout(() => {
+      toastTimers.delete(removeTimer);
+      toast.remove();
+    }, 220);
+
+    toastTimers.add(removeTimer);
   }, 3800);
+
+  toastTimers.add(hideTimer);
 }
 
 /**
@@ -721,6 +764,11 @@ export function openConfirmNewGameModal({ onConfirm, onCancel }) {
  * @returns {void}
  */
 export function resetToasts() {
+  for (const timer of toastTimers) {
+    window.clearTimeout(timer);
+  }
+
+  toastTimers.clear();
   const root = document.getElementById('toast-root');
 
   if (root) {

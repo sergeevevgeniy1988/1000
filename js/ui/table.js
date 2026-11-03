@@ -155,6 +155,9 @@ export function createPlayerPanel(state, player) {
       player.isHuman ? 'player-card--human' : '',
       isActing(state, player) ? 'player-card--active' : '',
     ],
+    attrs: {
+      'aria-label': `${player.name}. Счёт: ${player.score}. Болтов: ${player.bolts} из ${BOLTS.LIMIT}.`,
+    },
     dataset: { playerId: player.id },
   });
 
@@ -280,6 +283,9 @@ function createTrickSlot(state, player, options = {}) {
 
     if (entry.cardId === options.animatedCardId) {
       card.classList.add('card--played-now');
+      card.addEventListener('animationend', () => {
+        card.classList.remove('card--played-now');
+      }, { once: true });
     }
 
     slot.append(card);
@@ -362,7 +368,10 @@ function createTrumpIndicator(state) {
   });
 
   value.append(
-    createElement('span', { text: `${suit.symbol} ` }),
+    createElement('span', {
+      text: `${suit.symbol} `,
+      attrs: { 'aria-hidden': 'true' },
+    }),
     document.createTextNode(getSuitNameLower(state.trumpSuit)),
   );
 
@@ -406,7 +415,6 @@ export function createTableCenter(state, options = {}) {
     createElement('span', {
       className: 'phase-banner',
       text: getCenterPhaseLabel(state),
-      attrs: { 'aria-live': 'polite' },
     }),
     createElement('span', {
       className: 'trick-counter',

@@ -31,21 +31,35 @@
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
+.button:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 2px var(--color-focus-contrast),
+    0 8px 22px rgba(0, 0, 0, 0.32);
+}
+
 .button:disabled {
-  opacity: 0.45;
+  opacity: 0.58;
   filter: saturate(0.55);
   box-shadow: none;
+  transform: none;
 }
 
 .button--ghost {
   color: var(--color-text);
-  border-color: rgba(245, 239, 227, 0.25);
+  border-color: rgba(245, 239, 227, 0.32);
   background: transparent;
   box-shadow: none;
 }
 
 .button--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(245, 239, 227, 0.48);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.button--ghost:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-focus-contrast);
 }
 
 .pill {
@@ -155,11 +169,11 @@
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 7px;
-  border: 1px solid rgba(245, 239, 227, 0.18);
+  padding: 3px 8px;
+  border: 1px solid rgba(245, 239, 227, 0.24);
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
-  font-size: 0.6rem;
+  font-size: 0.63rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   line-height: 1.2;
@@ -170,14 +184,14 @@
 
 .badge--dealer {
   color: var(--color-gold-bright);
-  border-color: rgba(229, 185, 92, 0.4);
-  background: rgba(229, 185, 92, 0.1);
+  border-color: rgba(229, 185, 92, 0.5);
+  background: rgba(229, 185, 92, 0.12);
 }
 
 .badge--declarer {
   color: #d9f7e8;
-  border-color: rgba(111, 207, 163, 0.42);
-  background: rgba(52, 138, 105, 0.22);
+  border-color: rgba(111, 207, 163, 0.55);
+  background: rgba(52, 138, 105, 0.26);
 }
 
 .player-card__stats {
@@ -203,8 +217,9 @@
 .score__value {
   color: var(--color-gold-bright);
   font-family: var(--font-display);
-  font-size: 1.22rem;
+  font-size: clamp(1.15rem, 1.5vw, 1.32rem);
   font-variant-numeric: tabular-nums;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -245,40 +260,41 @@
   align-items: center;
   min-height: 22px;
   padding: 2px 9px;
-  border: 1px solid rgba(245, 239, 227, 0.14);
+  border: 1px solid rgba(245, 239, 227, 0.2);
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   white-space: nowrap;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .status-chip--bid {
   color: var(--color-gold-bright);
-  border-color: rgba(229, 185, 92, 0.38);
-  background: rgba(229, 185, 92, 0.1);
+  border-color: rgba(229, 185, 92, 0.45);
+  background: rgba(229, 185, 92, 0.12);
 }
 
 .status-chip--pass {
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
+  border-style: dashed;
 }
 
 .status-chip--turn {
-  color: #d9f7e8;
-  border-color: rgba(111, 207, 163, 0.42);
-  background: rgba(52, 138, 105, 0.2);
+  color: #e3fff1;
+  border-color: rgba(111, 207, 163, 0.55);
+  background: rgba(52, 138, 105, 0.26);
 }
 
 .status-chip--contract {
   color: var(--color-gold-bright);
-  border-color: rgba(229, 185, 92, 0.3);
+  border-color: rgba(229, 185, 92, 0.38);
   background: rgba(0, 0, 0, 0.22);
 }
 
 .status-chip--idle {
-  opacity: 0.75;
+  color: var(--color-text-muted);
 }
 
 .thinking {
@@ -564,16 +580,22 @@
 
 .hand__cards {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   align-items: flex-end;
   justify-content: center;
+  justify-content: safe center;
   min-width: 0;
-  padding: 6px 4px 0;
+  padding: 12px 4px 2px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-color: rgba(229, 185, 92, 0.35) transparent;
+  overscroll-behavior-x: contain;
+  scrollbar-color: rgba(229, 185, 92, 0.48) transparent;
   scrollbar-width: thin;
+}
+
+.hand__cards:focus-within {
+  scrollbar-color: rgba(245, 215, 140, 0.7) transparent;
 }
 
 .hand__empty {
@@ -598,7 +620,7 @@
 }
 
 .game-log__empty {
-  color: rgba(244, 239, 227, 0.5);
+  color: var(--color-text-faint);
   font-size: 0.84rem;
   line-height: 1.5;
 }

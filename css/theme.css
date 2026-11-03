@@ -14,11 +14,13 @@
   --color-ink: #241d12;
   --color-card-red: #a83028;
   --color-text: #f4efe3;
-  --color-text-muted: #a9bcae;
-  --color-text-faint: rgba(244, 239, 227, 0.45);
-  --color-danger: #e2776b;
+  --color-text-muted: #b6c8ba;
+  --color-text-faint: rgba(244, 239, 227, 0.64);
+  --color-danger: #f09186;
+  --color-success: #a9e6c8;
 
-  --color-focus: #f5d78c;
+  --color-focus: #ffe08a;
+  --color-focus-contrast: #052017;
 
   --font-display: Georgia, "Palatino Linotype", "Times New Roman", serif;
   --font-body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;

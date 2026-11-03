@@ -1,6 +1,8 @@
 .app {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   min-height: 100vh;
 }
 
@@ -80,7 +82,13 @@
 
 .app-header__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+}
+
+.log-toggle {
+  display: none;
 }
 
 .game {
@@ -145,6 +153,34 @@
   text-transform: uppercase;
 }
 
+.sidebar__close {
+  display: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border: 1px solid rgba(245, 239, 227, 0.24);
+  border-radius: 50%;
+  color: var(--color-text);
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.sidebar__close:hover {
+  border-color: rgba(229, 185, 92, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  display: none;
+  background: rgba(2, 10, 7, 0.62);
+  backdrop-filter: blur(3px);
+  animation: drawer-fade 180ms ease-out;
+}
+
 .app-footer {
   display: flex;
   gap: 16px;
@@ -189,12 +225,59 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .log-toggle {
+    display: inline-flex;
+  }
+
   .sidebar {
-    max-height: 190px;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    width: min(360px, calc(100vw - 44px));
+    max-height: none;
+    border-width: 0 0 0 1px;
+    border-radius: 16px 0 0 16px;
+    background: linear-gradient(180deg, #0b2c21, #041b14 70%);
+    box-shadow: -18px 0 50px rgba(0, 0, 0, 0.5);
+    visibility: hidden;
+    transform: translateX(102%);
+    transition:
+      transform 220ms cubic-bezier(0.2, 0.7, 0.25, 1),
+      visibility 0s linear 220ms;
+  }
+
+  .sidebar.sidebar--open {
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+  }
+
+  .sidebar__close {
+    display: grid;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+  }
+
+  body.has-drawer {
+    overflow: hidden;
   }
 
   .app-footer {
     display: none;
+  }
+}
+
+@keyframes drawer-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
@@ -208,6 +291,10 @@
   .app-header {
     gap: 6px 12px;
     padding: 6px 12px;
+  }
+
+  .brand__copy {
+    display: none;
   }
 
   .brand__mark {
@@ -434,6 +521,267 @@
 
   .hand {
     min-height: 96px;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand__copy {
+    display: none;
+  }
+
+  .app-header__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .app-header__actions .button {
+    flex: 1 1 auto;
+    padding: 0 10px;
+    font-size: 0.82rem;
+  }
+
+  .sidebar {
+    width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 520px) {
+  .app-header {
+    gap: 4px 10px;
+    padding: 2px 8px;
+  }
+
+  .brand__mark {
+    padding: 2px 7px;
+    font-size: 1rem;
+  }
+
+  .app-header .button {
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 0.74rem;
+  }
+
+  .pill {
+    padding: 3px 7px;
+    font-size: 0.66rem;
+  }
+
+  .pill__label {
+    font-size: 0.54rem;
+  }
+
+  .game {
+    padding: 2px 8px;
+  }
+
+  .game__board {
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    gap: 4px;
+  }
+
+  .opponents {
+    gap: 6px;
+  }
+
+  .player-card {
+    gap: 6px;
+    align-items: center;
+    padding: 3px 7px;
+  }
+
+  .player-card__avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 0.74rem;
+  }
+
+  .player-card__body {
+    gap: 1px;
+  }
+
+  .player-card__head {
+    gap: 3px 6px;
+  }
+
+  .player-card__name {
+    font-size: 0.82rem;
+  }
+
+  .player-card__status {
+    display: none;
+  }
+
+  .player-card__stats {
+    gap: 2px 8px;
+  }
+
+  .player-card__hand {
+    display: none;
+  }
+
+  .score__label,
+  .bolts__label,
+  .card-count {
+    font-size: 0.64rem;
+  }
+
+  .score__value {
+    font-size: 0.95rem;
+  }
+
+  .badge {
+    padding: 1px 5px;
+    font-size: 0.54rem;
+  }
+
+  .table-center {
+    min-height: 0;
+    padding: 3px 10px;
+    border-radius: 68px;
+  }
+
+  .table-center__inner {
+    min-height: 0;
+    gap: 2px;
+  }
+
+  .center-status {
+    gap: 2px 6px;
+  }
+
+  .phase-banner {
+    min-height: 21px;
+    padding: 2px 8px;
+    font-size: 0.6rem;
+  }
+
+  .trick-counter {
+    display: none;
+  }
+
+  .trick-points {
+    padding: 2px 7px;
+  }
+
+  .trick-points__label {
+    font-size: 0.54rem;
+  }
+
+  .trick-points__value {
+    font-size: 0.82rem;
+  }
+
+  .trick {
+    height: 58px;
+  }
+
+  .trick-slot__label {
+    display: none;
+  }
+
+  .trick-slot__empty {
+    width: 31px;
+    height: 44px;
+  }
+
+  .trick .card {
+    --card-width: 31px;
+  }
+
+  .center-meta {
+    gap: 2px 5px;
+  }
+
+  .indicator {
+    padding: 2px 7px;
+  }
+
+  .indicator__label {
+    font-size: 0.52rem;
+  }
+
+  .indicator__value {
+    font-size: 0.68rem;
+  }
+
+  .hand {
+    position: relative;
+    min-height: 52px;
+    padding: 2px 6px;
+  }
+
+  .hand__head {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+  }
+
+  .hand__cards {
+    gap: 4px;
+    padding-top: 5px;
+  }
+
+  .hand .card {
+    --card-width: 32px;
+  }
+
+  .hand .card--interactive:hover,
+  .hand .card--interactive:focus-visible {
+    outline-offset: 2px;
+    transform: none;
+  }
+
+  .hand .card__center {
+    font-size: 0.95rem;
+  }
+
+  .action-bar {
+    min-height: 30px;
+    padding: 3px 8px;
+  }
+
+  .action-bar__status {
+    font-size: 0.74rem;
+  }
+
+  .bidding-controls {
+    gap: 4px 10px;
+  }
+
+  .bidding-controls__info {
+    min-width: 92px;
+    flex-direction: row;
+    gap: 6px;
+    align-items: baseline;
+  }
+
+  .bidding-controls__title {
+    font-size: 0.8rem;
+  }
+
+  .bidding-controls__turn {
+    font-size: 0.64rem;
+  }
+
+  .bid-button {
+    min-width: 42px;
+    min-height: 28px;
+    padding: 0 7px;
+    font-size: 0.76rem;
+  }
+
+  .marriage-button {
+    min-height: 28px;
+    padding: 0 9px;
+    font-size: 0.74rem;
+  }
+
+  .app-footer {
+    display: none;
   }
 }
 

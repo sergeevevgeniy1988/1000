@@ -1,0 +1,39 @@
+/**
+ * Human-friendly messages for engine error codes. The engine still exposes
+ * precise technical messages, but the interface never shows internal card ids
+ * or phase names to the player.
+ */
+
+const ERROR_MESSAGES = Object.freeze({
+  PLAYER_PASSED: 'Этот игрок уже спасовал в текущей раздаче.',
+  NOT_YOUR_TURN: 'Сейчас не ваш ход. Дождитесь своей очереди.',
+  CANNOT_PASS: 'Открывающий торги обязан сказать 100 и не может пасовать.',
+  INVALID_BID: 'Такую ставку сделать нельзя. Выберите одну из доступных кнопок.',
+  INVALID_TARGET: 'Карту нужно отдать одному из соперников.',
+  TARGET_ALREADY_RECEIVED: 'Этому сопернику карта уже отдана. Выберите другого.',
+  CARD_NOT_IN_HAND: 'Этой карты уже нет в вашей руке.',
+  MARRIAGE_NOT_ALLOWED: 'Марьяж объявляется только перед первым ходом взятки после первой завершённой взятки.',
+  MARRIAGE_LIMIT: 'За один ход можно объявить только один марьяж.',
+  MARRIAGE_ALREADY_DECLARED: 'Этот марьяж уже объявлен в текущей раздаче.',
+  MARRIAGE_UNAVAILABLE: 'Для этого марьяжа нужны король и дама на руке.',
+  INVALID_SUIT: 'Эта масть сейчас недоступна для марьяжа.',
+  ILLEGAL_CARD: 'Этой картой сейчас ходить нельзя: следуйте масти, а при её отсутствии — козырю.',
+  INVALID_PHASE: 'Действие сейчас недоступно. Дождитесь нужной фазы игры.',
+  INVALID_CARD: 'Не удалось распознать карту. Попробуйте ещё раз.',
+  UNKNOWN_PLAYER: 'Не удалось определить игрока. Начните новую игру.',
+});
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function getActionErrorMessage(error) {
+  if (!error || typeof error !== 'object') {
+    return 'Не удалось выполнить действие. Попробуйте ещё раз.';
+  }
+
+  const code = typeof error.code === 'string' ? error.code : '';
+  const message = typeof error.message === 'string' ? error.message.trim() : '';
+
+  return ERROR_MESSAGES[code] ?? (message || 'Не удалось выполнить действие. Попробуйте ещё раз.');
+}

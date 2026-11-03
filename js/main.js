@@ -1,5 +1,6 @@
 import { TARGET_SCORE } from './core/constants.js';
 import { Controller } from './ui/controller.js';
+import { createLogDrawer } from './ui/log-drawer.js';
 import { hasSeenOnboarding, openOnboarding } from './ui/onboarding.js';
 import { openRulesModal } from './ui/rules-modal.js';
 import {
@@ -71,6 +72,11 @@ function bootstrap() {
     rulesButton: document.getElementById('rules'),
     settingsButton: document.getElementById('settings'),
     board: document.getElementById('game'),
+    announcer: document.getElementById('game-announcer'),
+    logSidebar: document.getElementById('game-log-panel'),
+    logToggle: document.getElementById('log-toggle'),
+    logClose: document.getElementById('log-close'),
+    logBackdrop: document.getElementById('log-backdrop'),
   };
 
   if (
@@ -90,15 +96,23 @@ function bootstrap() {
   let settings = applySettings(loadSettings());
   installSoundUnlock();
 
+  const logDrawer = createLogDrawer({
+    sidebar: elements.logSidebar,
+    toggleButton: elements.logToggle,
+    closeButton: elements.logClose,
+    backdrop: elements.logBackdrop,
+  });
+
   const controller = new Controller({
     players: PLAYERS,
     humanId: HUMAN_ID,
     seed: getSeedFromUrl(),
     targetScore: getTargetFromUrl(),
-    elements,
+    elements: { ...elements, logDrawer },
   });
 
   elements.rulesButton?.addEventListener('click', () => {
+    logDrawer?.close({ restoreFocus: false });
     controller.pause();
     const modal = openRulesModal({ onClose: () => controller.resume() });
 
@@ -108,6 +122,7 @@ function bootstrap() {
   });
 
   elements.settingsButton?.addEventListener('click', () => {
+    logDrawer?.close({ restoreFocus: false });
     controller.pause();
     const modal = openSettingsModal({
       settings,

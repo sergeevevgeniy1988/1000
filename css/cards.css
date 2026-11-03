@@ -117,18 +117,33 @@
   transform: translateY(-3px);
 }
 
+.card--interactive:focus-visible {
+  z-index: 2;
+  outline: 3px solid var(--color-focus);
+  outline-offset: 4px;
+  box-shadow:
+    0 0 0 2px var(--color-focus-contrast),
+    0 16px 26px rgba(0, 0, 0, 0.4);
+  transform: translateY(-6px);
+}
+
 .card--legal {
   outline: 2px solid var(--color-gold-bright);
   outline-offset: 2px;
 }
 
+.card--legal:focus-visible {
+  outline-color: var(--color-focus);
+}
+
 .card--illegal {
-  opacity: 0.42;
-  filter: grayscale(0.35);
+  opacity: 0.58;
+  filter: grayscale(0.4);
   cursor: not-allowed;
 }
 
-.card--illegal:hover {
+.card--illegal:hover,
+.card--illegal:active {
   transform: none;
 }
 
