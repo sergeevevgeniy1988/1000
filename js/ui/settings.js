@@ -92,12 +92,13 @@ export function saveSettings(settings, storage = getDefaultStorage()) {
  */
 export function applySettings(settings) {
   const normalized = normalizeSettings(settings);
+  const effectiveAnimations = normalized.animations && !prefersReducedMotion();
 
   setSoundEnabled(normalized.sound);
   setAnimationsEnabled(normalized.animations);
 
   if (typeof document !== 'undefined') {
-    document.documentElement.dataset.animations = normalized.animations ? 'on' : 'off';
+    document.documentElement.dataset.animations = effectiveAnimations ? 'on' : 'off';
   }
 
   return normalized;
