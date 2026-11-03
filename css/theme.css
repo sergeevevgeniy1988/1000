@@ -1,0 +1,133 @@
+:root {
+  color-scheme: dark;
+
+  --color-felt-deep: #061b14;
+  --color-felt-base: #0d3b2c;
+  --color-felt-light: #15573f;
+  --color-felt-glow: rgba(86, 174, 134, 0.22);
+
+  --color-gold: #e5b95c;
+  --color-gold-bright: #f5d78c;
+  --color-gold-soft: rgba(229, 185, 92, 0.32);
+
+  --color-cream: #f6efe0;
+  --color-ink: #241d12;
+  --color-card-red: #a83028;
+  --color-text: #f4efe3;
+  --color-text-muted: #a9bcae;
+  --color-text-faint: rgba(244, 239, 227, 0.45);
+  --color-danger: #e2776b;
+
+  --color-focus: #f5d78c;
+
+  --font-display: Georgia, "Palatino Linotype", "Times New Roman", serif;
+  --font-body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --shadow-panel: 0 12px 34px rgba(0, 0, 0, 0.22);
+  --shadow-deep: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+body {
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  background-color: var(--color-felt-deep);
+  background-image:
+    radial-gradient(ellipse at 50% -10%, var(--color-felt-glow), transparent 55%),
+    radial-gradient(ellipse at 50% 45%, var(--color-felt-light) 0%, var(--color-felt-base) 46%, var(--color-felt-deep) 100%);
+  background-attachment: fixed;
+  overflow-x: hidden;
+}
+
+::selection {
+  color: var(--color-ink);
+  background: var(--color-gold-bright);
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid rgba(245, 215, 140, 0.55);
+  border-radius: 10px;
+  color: #2a1c07;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  background: linear-gradient(180deg, #f0cd7d, #d8a94c);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    filter 150ms ease;
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+  transform: translateY(-1px);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  filter: saturate(0.55);
+  box-shadow: none;
+}
+
+.button--ghost {
+  color: var(--color-text);
+  border-color: rgba(245, 239, 227, 0.25);
+  background: transparent;
+  box-shadow: none;
+}
+
+.button--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid rgba(229, 185, 92, 0.28);
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.pill__label {
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pill--quiet {
+  border-color: rgba(245, 239, 227, 0.14);
+}
+
+.suit--red {
+  color: var(--color-card-red);
+}

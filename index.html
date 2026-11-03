@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b2b20">
+  <meta name="description" content="«Тысяча» — карточная игра на троих против двух AI-соперников.">
+  <title>1000 — Тысяча</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/layout.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <div class="brand" aria-label="Тысяча">
+        <span class="brand__mark" aria-hidden="true">1000</span>
+        <span class="brand__copy">
+          <span class="brand__title">Тысяча</span>
+          <span class="brand__tagline">Игра на троих</span>
+        </span>
+      </div>
+
+      <div class="app-header__meta">
+        <span class="pill"><span class="pill__label">Цель</span> До 1000</span>
+        <span class="pill pill--quiet"><span class="pill__label">Раздача</span> —</span>
+      </div>
+
+      <div class="app-header__actions">
+        <button class="button button--ghost" type="button" disabled>Правила</button>
+        <button class="button" type="button" disabled>Новая игра</button>
+      </div>
+    </header>
+
+    <main class="game" id="game">
+      <section class="game__board" aria-label="Игровой стол">
+        <div class="opponents" id="opponents"></div>
+        <div class="table-center" id="table-center"></div>
+        <div id="human-panel"></div>
+        <section class="hand" id="hand" aria-label="Ваши карты"></section>
+      </section>
+
+      <aside class="sidebar" aria-label="Журнал событий">
+        <div class="sidebar__head">
+          <h2 class="sidebar__title">Журнал</h2>
+          <span class="sidebar__hint">Партия</span>
+        </div>
+        <div class="game-log" id="game-log" role="log" aria-live="polite" aria-relevant="additions"></div>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <span>Локальная игра без подключения к сети</span>
+      <span aria-hidden="true">♠ ♥ ♦ ♣</span>
+    </footer>
+  </div>
+
+  <div id="modal-root"></div>
+
+  <noscript>
+    <div class="noscript">Для игры нужен JavaScript. Включите его в настройках браузера.</div>
+  </noscript>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

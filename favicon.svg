@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Тысяча">
+  <defs>
+    <linearGradient id="felt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15573f"/>
+      <stop offset="1" stop-color="#061b14"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5d78c"/>
+      <stop offset="1" stop-color="#d8a94c"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#felt)"/>
+  <rect x="3" y="3" width="58" height="58" rx="11" fill="none" stroke="url(#gold)" stroke-opacity="0.65"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Georgia, serif" font-size="22" font-weight="700" fill="url(#gold)">1000</text>
+</svg>
