@@ -14,6 +14,8 @@ export const SCORE_ANIMATION_MS = 700;
 
 const timers = new WeakMap();
 
+let animationsEnabled = true;
+
 /**
  * @returns {boolean} True when the user asked the system to reduce motion.
  */
@@ -21,6 +23,25 @@ export function prefersReducedMotion() {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Applies the user setting from the settings dialog. The operating-system
+ * preference still wins, so animations stay off when reduced motion is
+ * requested.
+ *
+ * @param {boolean} enabled
+ * @returns {void}
+ */
+export function setAnimationsEnabled(enabled) {
+  animationsEnabled = Boolean(enabled);
+}
+
+/**
+ * @returns {boolean} True when animations may run right now.
+ */
+export function animationsAllowed() {
+  return animationsEnabled && !prefersReducedMotion();
 }
 
 /**
@@ -62,7 +83,7 @@ function animateClass(element, className, duration, cleanup) {
  * @returns {void}
  */
 export function playDealAnimation(boardEl) {
-  if (!boardEl || prefersReducedMotion()) {
+  if (!boardEl || !animationsAllowed()) {
     return;
   }
 
@@ -87,7 +108,7 @@ export function playDealAnimation(boardEl) {
  * @returns {void}
  */
 export function playTrickCollect(trickEl, winnerPosition) {
-  if (!trickEl || prefersReducedMotion()) {
+  if (!trickEl || !animationsAllowed()) {
     return;
   }
 
@@ -111,7 +132,7 @@ export function playTrickCollect(trickEl, winnerPosition) {
  * @returns {void}
  */
 export function playScoreAnimation(modalEl) {
-  if (!modalEl || prefersReducedMotion()) {
+  if (!modalEl || !animationsAllowed()) {
     return;
   }
 

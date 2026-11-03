@@ -1,5 +1,14 @@
 import { TARGET_SCORE } from './core/constants.js';
 import { Controller } from './ui/controller.js';
+import { hasSeenOnboarding, openOnboarding } from './ui/onboarding.js';
+import { openRulesModal } from './ui/rules-modal.js';
+import {
+  applySettings,
+  loadSettings,
+  openSettingsModal,
+  saveSettings,
+} from './ui/settings.js';
+import { installSoundUnlock } from './ui/sound.js';
 
 const PLAYERS = [
   { id: 'alice', name: 'Алиса', isHuman: false },
@@ -59,6 +68,8 @@ function bootstrap() {
     targetScore: document.getElementById('target-score'),
     dealNumber: document.getElementById('deal-number'),
     newGameButton: document.getElementById('new-game'),
+    rulesButton: document.getElementById('rules'),
+    settingsButton: document.getElementById('settings'),
     board: document.getElementById('game'),
   };
 
@@ -76,6 +87,9 @@ function bootstrap() {
     return;
   }
 
+  let settings = applySettings(loadSettings());
+  installSoundUnlock();
+
   const controller = new Controller({
     players: PLAYERS,
     humanId: HUMAN_ID,
@@ -84,7 +98,36 @@ function bootstrap() {
     elements,
   });
 
-  controller.start();
+  elements.rulesButton?.addEventListener('click', () => {
+    controller.pause();
+    const modal = openRulesModal({ onClose: () => controller.resume() });
+
+    if (!modal) {
+      controller.resume();
+    }
+  });
+
+  elements.settingsButton?.addEventListener('click', () => {
+    controller.pause();
+    const modal = openSettingsModal({
+      settings,
+      onChange: (nextSettings) => {
+        settings = saveSettings(nextSettings);
+      },
+      onClose: () => controller.resume(),
+    });
+
+    if (!modal) {
+      controller.resume();
+    }
+  });
+
+  if (hasSeenOnboarding()) {
+    controller.start();
+  } else {
+    openOnboarding({ onStart: () => controller.start() });
+  }
+
   document.body.dataset.appState = 'ready';
 }
 

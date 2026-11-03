@@ -22,12 +22,13 @@ import {
   showToast,
 } from './modals.js';
 import {
+  animationsAllowed,
   cancelAnimations,
   playDealAnimation,
   playTrickCollect,
-  prefersReducedMotion,
   TRICK_REVEAL_MS,
 } from './animations.js';
+import { playSound } from './sound.js';
 
 const AI_MIN_DELAY = 500;
 const AI_MAX_DELAY = 980;
@@ -172,6 +173,37 @@ export class Controller {
   }
 
   /**
+   * Pauses AI decisions while a dialog is open. Human actions are already
+   * blocked by the modal overlay, but timers must not fire behind it.
+   *
+   * @returns {void}
+   */
+  pause() {
+    if (!this.#game) {
+      return;
+    }
+
+    this.#paused = true;
+    this.#clearAITimer();
+  }
+
+  /**
+   * Resumes AI decisions after a dialog closes and restores the correct modal
+   * for the current phase, if one is required.
+   *
+   * @returns {void}
+   */
+  resume() {
+    if (!this.#game) {
+      return;
+    }
+
+    this.#paused = false;
+    this.#syncModals(this.#game.getState());
+    this.#scheduleAI();
+  }
+
+  /**
    * Detaches listeners and stops timers. Intended for tests and hot reloads.
    *
    * @returns {void}
@@ -214,16 +246,29 @@ export class Controller {
       game.on(GAME_EVENTS.ERROR, (error) => this.#handleGameError(error)),
       game.on(GAME_EVENTS.BID, (payload) => {
         this.#setBubble(payload.playerId, String(payload.amount));
+        playSound('bid');
       }),
       game.on(GAME_EVENTS.PASS, (payload) => {
         this.#setBubble(payload.playerId, 'Пас');
+        playSound('pass');
       }),
-      game.on(GAME_EVENTS.DEAL_STARTED, () => this.#handleDealStarted()),
-      game.on(GAME_EVENTS.PRIKUP, (payload) => this.#handlePrikup(payload)),
+      game.on(GAME_EVENTS.DEAL_STARTED, () => {
+        this.#handleDealStarted();
+        playSound('deal');
+      }),
+      game.on(GAME_EVENTS.PRIKUP, (payload) => {
+        this.#handlePrikup(payload);
+        playSound('prikup');
+      }),
+      game.on(GAME_EVENTS.GIFT, () => playSound('gift')),
+      game.on(GAME_EVENTS.MARRIAGE, () => playSound('marriage')),
       game.on(GAME_EVENTS.CARD_PLAYED, (payload) => {
         this.#lastPlayedCardId = payload.cardId;
+        playSound('card');
       }),
       game.on(GAME_EVENTS.TRICK_WON, (payload) => this.#handleTrickWon(payload)),
+      game.on(GAME_EVENTS.SCORED, () => playSound('score')),
+      game.on(GAME_EVENTS.GAME_OVER, () => playSound('win')),
     ];
 
     this.#aiCache.clear();
@@ -246,6 +291,7 @@ export class Controller {
    */
   #handleGameError(error) {
     console.error('[1000]', error);
+    playSound('error');
     showToast(error?.message ?? 'Игровая ошибка.');
   }
 
@@ -297,8 +343,9 @@ export class Controller {
    */
   #handleTrickWon(payload) {
     this.#clearTrickReveal();
+    playSound('trick');
 
-    if (prefersReducedMotion()) {
+    if (!animationsAllowed()) {
       return;
     }
 
