@@ -1,8 +1,5 @@
 import { TARGET_SCORE } from './core/constants.js';
-import { Game } from './core/game.js';
-import { renderHand } from './ui/hand.js';
-import { renderLog } from './ui/log.js';
-import { renderTable } from './ui/table.js';
+import { Controller } from './ui/controller.js';
 
 const PLAYERS = [
   { id: 'alice', name: 'Алиса', isHuman: false },
@@ -13,49 +10,81 @@ const PLAYERS = [
 const HUMAN_ID = 'human';
 
 /**
- * Updates static deal metadata in the header.
+ * Reads a deterministic seed from `?seed=12345`.
  *
- * @param {object} state
- * @param {HTMLElement | null} targetScoreEl
- * @param {HTMLElement | null} dealNumberEl
+ * @returns {number | null}
  */
-function renderHeader(state, targetScoreEl, dealNumberEl) {
-  if (targetScoreEl) {
-    targetScoreEl.textContent = String(state.targetScore);
+function getSeedFromUrl() {
+  const raw = new URLSearchParams(window.location.search).get('seed');
+
+  if (raw === null || raw.trim() === '') {
+    return null;
   }
 
-  if (dealNumberEl) {
-    dealNumberEl.textContent = state.dealNumber > 0 ? String(state.dealNumber) : '—';
+  const value = Number(raw);
+
+  return Number.isFinite(value) ? value >>> 0 : null;
+}
+
+/**
+ * Reads an optional development target score from `?target=`.
+ * The production default always remains 1000.
+ *
+ * @returns {number}
+ */
+function getTargetFromUrl() {
+  const raw = new URLSearchParams(window.location.search).get('target');
+
+  if (raw === null) {
+    return TARGET_SCORE;
   }
+
+  const value = Number(raw);
+
+  if (!Number.isFinite(value) || value < 50 || value > 100000) {
+    return TARGET_SCORE;
+  }
+
+  return Math.round(value);
 }
 
 function bootstrap() {
-  const opponents = document.getElementById('opponents');
-  const humanPanel = document.getElementById('human-panel');
-  const tableCenter = document.getElementById('table-center');
-  const hand = document.getElementById('hand');
-  const gameLog = document.getElementById('game-log');
-  const targetScoreEl = document.getElementById('target-score');
-  const dealNumberEl = document.getElementById('deal-number');
+  const elements = {
+    opponents: document.getElementById('opponents'),
+    humanPanel: document.getElementById('human-panel'),
+    tableCenter: document.getElementById('table-center'),
+    hand: document.getElementById('hand'),
+    gameLog: document.getElementById('game-log'),
+    actionBar: document.getElementById('action-bar'),
+    targetScore: document.getElementById('target-score'),
+    dealNumber: document.getElementById('deal-number'),
+    newGameButton: document.getElementById('new-game'),
+    board: document.getElementById('game'),
+  };
 
-  if (!opponents || !humanPanel || !tableCenter || !hand || !gameLog) {
+  if (
+    !elements.opponents
+    || !elements.humanPanel
+    || !elements.tableCenter
+    || !elements.hand
+    || !elements.gameLog
+    || !elements.actionBar
+    || !elements.targetScore
+    || !elements.dealNumber
+    || !elements.board
+  ) {
     return;
   }
 
-  const game = new Game({
+  const controller = new Controller({
     players: PLAYERS,
-    targetScore: TARGET_SCORE,
+    humanId: HUMAN_ID,
+    seed: getSeedFromUrl(),
+    targetScore: getTargetFromUrl(),
+    elements,
   });
 
-  game.subscribe((state) => {
-    renderTable(state, { opponents, humanPanel, tableCenter });
-    renderHand(state, { handEl: hand, playerId: HUMAN_ID });
-    renderLog(state, gameLog);
-    renderHeader(state, targetScoreEl, dealNumberEl);
-    document.body.dataset.phase = state.phase;
-  });
-
-  game.start();
+  controller.start();
   document.body.dataset.appState = 'ready';
 }
 

@@ -256,19 +256,33 @@ function getSeatPosition(state, player) {
 /**
  * @param {object} state
  * @param {object} player
+ * @param {object} [options]
+ * @param {string | null} [options.animatedCardId]
+ * @param {string | null} [options.winnerId]
  * @returns {HTMLElement}
  */
-function createTrickSlot(state, player) {
+function createTrickSlot(state, player, options = {}) {
   const entry = state.currentTrick.find((cardEntry) => cardEntry.playerId === player.id);
+  const isWinner = options.winnerId === player.id;
   const slot = createElement('div', {
-    className: ['trick-slot', `trick-slot--${getSeatPosition(state, player)}`],
+    className: [
+      'trick-slot',
+      `trick-slot--${getSeatPosition(state, player)}`,
+      isWinner ? 'trick-slot--winner' : '',
+    ].filter(Boolean),
     dataset: { playerId: player.id },
   });
 
   slot.append(createElement('span', { className: 'trick-slot__label', text: player.name }));
 
   if (entry) {
-    slot.append(createCard(entry.cardId, { compact: true }));
+    const card = createCard(entry.cardId, { compact: true });
+
+    if (entry.cardId === options.animatedCardId) {
+      card.classList.add('card--played-now');
+    }
+
+    slot.append(card);
   } else {
     slot.append(createElement('span', {
       className: 'trick-slot__empty',
@@ -379,9 +393,12 @@ function createContractIndicator(state) {
  * Creates the central table area with the trick, phase and deal indicators.
  *
  * @param {object} state
+ * @param {object} [options]
+ * @param {string | null} [options.animatedCardId]
+ * @param {string | null} [options.winnerId]
  * @returns {HTMLElement}
  */
-export function createTableCenter(state) {
+export function createTableCenter(state, options = {}) {
   const inner = createElement('div', { className: 'table-center__inner' });
   const status = createElement('div', { className: 'center-status' });
 
@@ -413,7 +430,7 @@ export function createTableCenter(state) {
   });
 
   for (const player of state.players) {
-    trick.append(createTrickSlot(state, player));
+    trick.append(createTrickSlot(state, player, options));
   }
 
   const meta = createElement('div', { className: 'center-meta' });
@@ -431,8 +448,11 @@ export function createTableCenter(state) {
  * @param {HTMLElement} elements.opponents
  * @param {HTMLElement} elements.humanPanel
  * @param {HTMLElement} elements.tableCenter
+ * @param {object} [options]
+ * @param {string | null} [options.animatedCardId]
+ * @param {string | null} [options.winnerId]
  */
-export function renderTable(state, elements) {
+export function renderTable(state, elements, options = {}) {
   const { opponents, humanPanel, tableCenter } = elements;
   const human = state.players.find((player) => player.isHuman) ?? state.players[0];
   const otherPlayers = state.players.filter((player) => player.id !== human.id);
@@ -441,5 +461,5 @@ export function renderTable(state, elements) {
     ...otherPlayers.map((player) => createPlayerPanel(state, player)),
   );
   humanPanel.replaceChildren(createPlayerPanel(state, human));
-  tableCenter.replaceChildren(createTableCenter(state));
+  tableCenter.replaceChildren(createTableCenter(state, options));
 }

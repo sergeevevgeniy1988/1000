@@ -97,7 +97,7 @@
 
 .game__board {
   display: grid;
-  grid-template-rows: auto minmax(210px, 1fr) auto auto;
+  grid-template-rows: auto minmax(210px, 1fr) auto auto auto;
   gap: 10px;
   min-width: 0;
 }
@@ -235,7 +235,7 @@
   }
 
   .game__board {
-    grid-template-rows: auto minmax(160px, 1fr) auto auto;
+    grid-template-rows: auto minmax(160px, 1fr) auto auto auto;
     gap: 8px;
   }
 
@@ -379,7 +379,7 @@
   }
 
   .game__board {
-    grid-template-rows: auto minmax(210px, 1fr) auto auto;
+    grid-template-rows: auto minmax(210px, 1fr) auto auto auto;
     gap: 10px;
   }
 
