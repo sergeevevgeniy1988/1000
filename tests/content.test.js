@@ -73,6 +73,22 @@ test('rules cover every section of the rulebook', () => {
   }
 });
 
+test('visible rules text is fully Russian', () => {
+  const visibleText = RULES_SECTIONS.flatMap((section) => [
+    section.title,
+    ...section.blocks.flatMap((block) => [
+      block.text ?? '',
+      block.caption ?? '',
+      ...(block.items ?? []),
+      ...(block.headers ?? []),
+      ...(block.rows ?? []).flat(),
+      ...(block.lines ?? []),
+    ]),
+  ]).join(' ');
+
+  assert.doesNotMatch(visibleText, /[A-Za-z]/, 'Rules copy must not contain Latin letters.');
+});
+
 test('the not-implemented section lists v1 exclusions', () => {
   const section = RULES_SECTIONS.find((entry) => entry.id === 'not-implemented');
   const text = section.blocks
