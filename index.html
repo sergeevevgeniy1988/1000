@@ -9,6 +9,8 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/reset.css">
   <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/cards.css">
+  <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/layout.css">
 </head>
 <body>
@@ -23,8 +25,12 @@
       </div>
 
       <div class="app-header__meta">
-        <span class="pill"><span class="pill__label">Цель</span> До 1000</span>
-        <span class="pill pill--quiet"><span class="pill__label">Раздача</span> —</span>
+        <span class="pill">
+          <span class="pill__label">Цель</span> До <span id="target-score">1000</span>
+        </span>
+        <span class="pill pill--quiet">
+          <span class="pill__label">Раздача</span> <span id="deal-number">—</span>
+        </span>
       </div>
 
       <div class="app-header__actions">

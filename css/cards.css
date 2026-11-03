@@ -1,0 +1,193 @@
+.card {
+  --card-width: clamp(46px, 5vw, 64px);
+
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  justify-content: space-between;
+  width: var(--card-width);
+  height: calc(var(--card-width) * 1.42);
+  padding: clamp(4px, 0.55vw, 7px);
+  overflow: hidden;
+  border: 1px solid rgba(37, 24, 8, 0.3);
+  border-radius: clamp(5px, 0.55vw, 8px);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(255, 255, 255, 0.94), transparent 68%),
+    linear-gradient(155deg, #fffdf6 0%, #f6ecd8 58%, #e7d6b5 100%);
+  box-shadow:
+    0 7px 16px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  cursor: default;
+  user-select: none;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease,
+    filter 160ms ease;
+}
+
+.card::after {
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(60, 40, 15, 0.12);
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.card--red {
+  color: var(--color-card-red);
+}
+
+.card--black {
+  color: var(--color-ink);
+}
+
+.card__corner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: center;
+  align-self: flex-start;
+}
+
+.card__corner--bottom {
+  align-self: flex-end;
+  transform: rotate(180deg);
+}
+
+.card__rank {
+  font-size: clamp(0.68rem, 1vw, 0.92rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.card__suit {
+  font-size: clamp(0.6rem, 0.9vw, 0.8rem);
+}
+
+.card__center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.5rem, 2.6vw, 2.4rem);
+  opacity: 0.9;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.card--compact {
+  --card-width: clamp(34px, 3.4vw, 44px);
+
+  padding: 4px;
+}
+
+.card--compact .card__rank {
+  font-size: 0.7rem;
+}
+
+.card--compact .card__suit {
+  font-size: 0.62rem;
+}
+
+.card--compact .card__center {
+  font-size: clamp(1.1rem, 2vw, 1.5rem);
+}
+
+.card--interactive {
+  cursor: pointer;
+}
+
+.card--interactive:hover {
+  box-shadow:
+    0 16px 26px rgba(0, 0, 0, 0.36),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  transform: translateY(-8px) rotate(-1deg);
+}
+
+.card--interactive:active {
+  transform: translateY(-3px);
+}
+
+.card--legal {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 2px;
+}
+
+.card--illegal {
+  opacity: 0.42;
+  filter: grayscale(0.35);
+  cursor: not-allowed;
+}
+
+.card--illegal:hover {
+  transform: none;
+}
+
+.card:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+.card-back {
+  --card-width: clamp(36px, 3.4vw, 44px);
+
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: var(--card-width);
+  height: calc(var(--card-width) * 1.42);
+  border: 2px solid rgba(245, 215, 140, 0.66);
+  border-radius: clamp(5px, 0.55vw, 8px);
+  background:
+    repeating-linear-gradient(45deg, rgba(245, 215, 140, 0.15) 0 2px, transparent 2px 7px),
+    repeating-linear-gradient(-45deg, rgba(245, 215, 140, 0.11) 0 2px, transparent 2px 7px),
+    radial-gradient(circle at 50% 50%, #1b5f46, #083526 62%, #041d15);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.card-back::before {
+  position: absolute;
+  inset: 4px;
+  border: 1px solid rgba(245, 215, 140, 0.5);
+  border-radius: 3px;
+  content: "";
+}
+
+.card-back::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(245, 215, 140, 0.55);
+  font-family: var(--font-display);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  content: "1000";
+}
+
+.card-back--compact {
+  --card-width: clamp(24px, 2.3vw, 30px);
+}
+
+.opponent-hand {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding-left: calc(clamp(24px, 2.3vw, 30px) * 0.16);
+}
+
+.opponent-hand .card-back + .card-back {
+  margin-left: calc(clamp(24px, 2.3vw, 30px) * -0.6);
+}
