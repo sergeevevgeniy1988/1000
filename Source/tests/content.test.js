@@ -104,6 +104,7 @@ test('rules describe one contract raise after the prikup', () => {
   assert.match(biddingText, /один раз повысить заказ/i);
   assert.match(prikupText, /один раз повысить заказ/i);
   assert.match(prikupText, /до первой карты отдара/i);
+  assert.match(prikupText, /Играющий с отрицательным счётом не может повышать заказ/i);
   assert.doesNotMatch(biddingText, /После прикупа ставка не повышается/i);
   assert.doesNotMatch(notImplementedText, /повышение ставки после прикупа/i);
 });
