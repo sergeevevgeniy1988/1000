@@ -48,6 +48,7 @@ export class Game {
   #prikupTaken = false;
   #prikupRevealed = false;
   #contract = null;
+  #raiseDecided = false;
   #declarerId = null;
   #currentBid = 0;
   #activeBidderIds = /** @type {string[]} */ ([]);
@@ -253,6 +254,7 @@ export class Game {
 
     player.hand.push(...this.#prikup);
     this.#prikupTaken = true;
+    this.#raiseDecided = false;
     this.#phase = PHASES.GIVING;
 
     const payload = deepFreeze({
@@ -265,6 +267,96 @@ export class Game {
     this.#emitter.emit(GAME_EVENTS.PRIKUP, payload);
 
     return this.#emitStateChange();
+  }
+
+  /**
+   * Raises the contract once after the prikup is taken and before the first
+   * gift. Passing `null` declines the raise and leaves the contract unchanged.
+   *
+   * @param {string} playerId
+   * @param {number | null} amountOrNull New contract or null to decline.
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When the raise is not allowed.
+   */
+  raiseContract(playerId, amountOrNull) {
+    this.#assertPhase(PHASES.GIVING, 'raiseContract');
+
+    const player = this.#getPlayer(playerId);
+
+    if (player.id !== this.#declarerId) {
+      this.#fail(
+        'NOT_DECLARER',
+        'Только играющий может повысить заказ.',
+        { playerId: player.id, declarerId: this.#declarerId },
+      );
+    }
+
+    if (this.#givenCards.length > 0) {
+      this.#fail(
+        'RAISE_WINDOW_CLOSED',
+        'Повысить заказ можно только до первой отданной карты.',
+      );
+    }
+
+    if (this.#raiseDecided) {
+      this.#fail('RAISE_ALREADY_DECIDED', 'Решение о повышении заказа уже принято.');
+    }
+
+    if (amountOrNull === null) {
+      this.#raiseDecided = true;
+      return this.#emitStateChange();
+    }
+
+    if (player.score < 0) {
+      this.#fail(
+        'NEGATIVE_SCORE_NO_RAISE',
+        `Игрок ${player.name} не может повышать заказ при отрицательном счёте.`,
+        { playerId: player.id, score: player.score },
+      );
+    }
+
+    if (
+      typeof amountOrNull !== 'number'
+      || !Number.isInteger(amountOrNull)
+      || amountOrNull % BIDDING.STEP !== 0
+      || amountOrNull <= this.#contract
+      || amountOrNull > BIDDING.MAX
+    ) {
+      this.#fail(
+        'INVALID_RAISE',
+        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${BIDDING.MAX}.`,
+        { amount: amountOrNull, contract: this.#contract },
+      );
+    }
+
+    const previousContract = this.#contract;
+
+    this.#contract = amountOrNull;
+    player.bid = amountOrNull;
+    this.#currentBid = amountOrNull;
+    this.#raiseDecided = true;
+
+    const payload = deepFreeze({
+      playerId: player.id,
+      amount: amountOrNull,
+      contract: amountOrNull,
+      previousContract,
+    });
+
+    this.#addLog('contractraised', payload);
+    this.#emitter.emit(GAME_EVENTS.CONTRACT_RAISED, payload);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Declines the optional contract raise.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   */
+  declineRaise(playerId) {
+    return this.raiseContract(playerId, null);
   }
 
   /**
@@ -300,6 +392,10 @@ export class Game {
       this.#fail('CARD_NOT_IN_HAND', `Карты ${card.id} нет в руке играющего.`, {
         cardId: card.id,
       });
+    }
+
+    if (this.#givenCards.length === 0) {
+      this.#raiseDecided = true;
     }
 
     declarer.hand.splice(cardIndex, 1);
@@ -594,6 +690,7 @@ export class Game {
     this.#prikupTaken = false;
     this.#prikupRevealed = false;
     this.#contract = null;
+    this.#raiseDecided = false;
     this.#declarerId = null;
     this.#currentBid = 0;
     this.#activeBidderIds = [];
@@ -920,6 +1017,7 @@ export class Game {
       prikupRevealed: this.#prikupRevealed,
       prikupTaken: this.#prikupTaken,
       contract: this.#contract,
+      raiseDecided: this.#raiseDecided,
       declarerId: this.#declarerId,
       currentBid: this.#currentBid,
       activeBidderIds: [...this.#activeBidderIds],

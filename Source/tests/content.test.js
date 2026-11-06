@@ -87,6 +87,27 @@ test('prikup rules describe the public reveal before taking', () => {
   assert.doesNotMatch(text, /не раскрывается до момента/i);
 });
 
+test('rules describe one contract raise after the prikup', () => {
+  const bidding = RULES_SECTIONS.find((entry) => entry.id === 'bidding');
+  const prikup = RULES_SECTIONS.find((entry) => entry.id === 'prikup');
+  const notImplemented = RULES_SECTIONS.find((entry) => entry.id === 'not-implemented');
+  const biddingText = bidding.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+  const prikupText = prikup.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+  const notImplementedText = notImplemented.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+
+  assert.match(biddingText, /один раз повысить заказ/i);
+  assert.match(prikupText, /один раз повысить заказ/i);
+  assert.match(prikupText, /до первой карты отдара/i);
+  assert.doesNotMatch(biddingText, /После прикупа ставка не повышается/i);
+  assert.doesNotMatch(notImplementedText, /повышение ставки после прикупа/i);
+});
+
 test('visible rules text is fully Russian', () => {
   const visibleText = RULES_SECTIONS.flatMap((section) => [
     section.title,

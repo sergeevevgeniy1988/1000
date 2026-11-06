@@ -41,6 +41,18 @@ test('engine errors become short Russian messages without internal ids', () => {
     getActionErrorMessage({ code: 'NEGATIVE_SCORE_CANNOT_BID' }),
     'При отрицательном счёте нельзя повышать ставку или пасовать. Можно только открыть 80.',
   );
+  assert.equal(
+    getActionErrorMessage({ code: 'NEGATIVE_SCORE_NO_RAISE' }),
+    'При отрицательном счёте повышать заказ нельзя.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'RAISE_WINDOW_CLOSED' }),
+    'Повысить заказ можно только до первой отданной карты.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'RAISE_ALREADY_DECIDED' }),
+    'Решение о повышении заказа уже принято.',
+  );
   assert.match(getActionErrorMessage({ code: 'MARRIAGE_NOT_ALLOWED' }), /первой завершённой взятки/);
   assert.equal(getActionErrorMessage({ code: 'NOT_YOUR_TURN' }), 'Сейчас не ваш ход. Дождитесь своей очереди.');
 });
@@ -84,6 +96,18 @@ test('phase announcements describe the public prikup reveal', () => {
       declarerId: 'alice',
     })),
     'Прикуп раскрыт всем игрокам. Алиса забирает карты.',
+  );
+});
+
+test('phase announcements include the final contract during gifts', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 85,
+    })),
+    'Отдар. Заказ — 85. Выберите по одной карте для Алисы и Бориса.',
   );
 });
 

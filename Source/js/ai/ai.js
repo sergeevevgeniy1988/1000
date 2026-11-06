@@ -139,7 +139,7 @@ function getSelf(view, actorId) {
  * Resolves the player whose turn it is for the requested action.
  *
  * @param {object} view
- * @param {'bid' | 'gifts' | 'play'} action
+ * @param {'bid' | 'gifts' | 'raise' | 'play'} action
  * @param {{ playerId: string | null }} options
  * @returns {string}
  */
@@ -147,6 +147,7 @@ function resolveActorId(view, action, options) {
   const candidates = {
     bid: view?.currentBidderId,
     gifts: view?.declarerId,
+    raise: view?.declarerId,
     play: view?.currentPlayerId,
   };
   const actorId = candidates[action];
@@ -577,6 +578,67 @@ export function chooseBid(view, currentBid = view?.currentBid, options = {}) {
 }
 
 /**
+ * Chooses whether to raise the contract after taking the prikup. The decision
+ * compares the evaluated ten-card hand with the current contract and never
+ * proposes a raise for negative-score players.
+ *
+ * @param {object} view Player view of the declarer.
+ * @param {object} [options]
+ * @param {string} [options.playerId] Expected acting player.
+ * @param {string | object} [options.personality] Personality preset or overrides.
+ * @param {() => number} [options.rng] Random source for slight variation.
+ * @returns {number | null} A legal contract amount or null to decline.
+ */
+export function chooseContractRaise(view, options = {}) {
+  const settings = normalizeOptions(options);
+
+  try {
+    if (!view || view.phase !== PHASES.GIVING) {
+      return null;
+    }
+
+    const actorId = resolveActorId(view, 'raise', settings);
+    const { self, hand } = getSelfHand(view, actorId);
+
+    if (view.raiseDecided === true) {
+      return null;
+    }
+
+    if (Array.isArray(view.givenCards) && view.givenCards.length > 0) {
+      return null;
+    }
+
+    if (Number.isFinite(self.score) && self.score < 0) {
+      return null;
+    }
+
+    const contract = Number.isFinite(view.contract) ? view.contract : 0;
+
+    if (contract >= BIDDING.MAX) {
+      return null;
+    }
+
+    const evaluation = evaluateHand(hand);
+    const noise = (randomValue(settings.rng) - 0.5) * settings.personality.bidVariance;
+    const estimate = evaluation.estimatedPoints
+      + settings.personality.bidBias
+      + noise
+      - BIDDING.STEP * 2;
+    const target = Math.floor(estimate / BIDDING.STEP) * BIDDING.STEP;
+
+    if (target <= contract) {
+      return null;
+    }
+
+    return Math.min(BIDDING.MAX, target);
+  } catch (error) {
+    console.error('[AI] Не удалось выбрать повышение заказа.', error);
+
+    return null;
+  }
+}
+
+/**
  * Chooses one gift card for every opponent who has not received one yet.
  *
  * @param {object} view Player view of the declarer.
@@ -783,6 +845,7 @@ export function chooseCard(view, legalCards = null, options = {}) {
  *   playerId: string,
  *   personality: string,
  *   chooseBid: (view: object, currentBid?: number) => number | null,
+ *   chooseContractRaise: (view: object) => number | null,
  *   chooseCardsToGive: (view: object) => { toPlayerId: string, cardId: string }[],
  *   chooseMarriage: (view: object) => string | null,
  *   chooseCard: (view: object, legalCards?: ReadonlyArray<Card | string> | null) => Card,
@@ -809,6 +872,9 @@ export function createAI({ playerId, personality, rng = Math.random } = {}) {
     personality: settings.name,
     chooseBid(view, currentBid = view?.currentBid) {
       return chooseBid(view, currentBid, options);
+    },
+    chooseContractRaise(view) {
+      return chooseContractRaise(view, options);
     },
     chooseCardsToGive(view) {
       return chooseCardsToGive(view, options);

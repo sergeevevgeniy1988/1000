@@ -1,5 +1,7 @@
+import { BIDDING, PHASES } from '../js/core/constants.js';
 import { createDeck, getCardById } from '../js/core/deck.js';
 import { Game } from '../js/core/game.js';
+import { mulberry32 } from '../js/core/rng.js';
 import { getLegalCards } from '../js/core/rules.js';
 
 /** The canonical three-player seating order used by the game. */
@@ -177,4 +179,110 @@ export function playFirstLegal(game) {
   }
 
   return game.playCard(playerId, legalCards[0].id);
+}
+
+/**
+ * @param {object} state
+ * @returns {object}
+ */
+function chooseSimpleCard(state) {
+  const player = state.players.find((entry) => entry.id === state.currentPlayerId);
+  const leadSuit = state.currentTrick.length === 0
+    ? null
+    : getCardById(state.currentTrick[0].cardId).suit;
+  const legal = getLegalCards(player.hand, leadSuit, state.trumpSuit)
+    .sort((left, right) => left.strength - right.strength);
+
+  return player.id === state.declarerId
+    ? legal[0]
+    : legal[legal.length - 1];
+}
+
+/**
+ * Plays one deterministic deal: the opener wins with the minimum bid, the
+ * declarer takes the prikup and gives cards, then cards are played to finish.
+ *
+ * @param {Game} game
+ * @returns {void}
+ */
+function playSimpleDeal(game) {
+  let actions = 0;
+
+  while (game.getState().phase !== PHASES.DEAL_END) {
+    const state = game.getState();
+
+    if (state.phase === PHASES.BIDDING) {
+      const bidder = state.players.find((player) => player.id === state.currentBidderId);
+
+      if (state.currentBid === 0) {
+        game.bid(state.currentBidderId, BIDDING.MIN);
+      } else if (bidder.score >= 0) {
+        game.bid(state.currentBidderId, BIDDING.MAX);
+      } else {
+        throw new Error('A negative player must be passed automatically.');
+      }
+    } else if (state.phase === PHASES.PRIKUP) {
+      game.takePrikup(state.declarerId);
+    } else if (state.phase === PHASES.GIVING) {
+      const declarer = state.players.find((player) => player.id === state.declarerId);
+      const received = new Set(state.givenCards.map((gift) => gift.toId));
+      const target = state.players.find(
+        (player) => player.id !== declarer.id && !received.has(player.id),
+      );
+      const givenCardIds = new Set(state.givenCards.map((gift) => gift.cardId));
+      const cardId = declarer.hand.find((id) => !givenCardIds.has(id));
+
+      game.giveCard(target.id, cardId);
+    } else if (state.phase === PHASES.PLAYING) {
+      game.playCard(state.currentPlayerId, chooseSimpleCard(state).id);
+    } else {
+      throw new Error(`Unexpected phase ${state.phase} while playing a simple deal.`);
+    }
+
+    actions += 1;
+
+    if (actions >= 100) {
+      throw new Error('A simple deal must finish.');
+    }
+  }
+}
+
+/**
+ * Plays deterministic deals until every player has a negative score and a new
+ * bidding phase starts. Used by negative-score scenarios in tests.
+ *
+ * @param {object} [options]
+ * @param {number} [options.seed]
+ * @param {number} [options.maxDeals]
+ * @returns {Game}
+ */
+export function createAllNegativeBiddingGame({ seed = 1, maxDeals = 200 } = {}) {
+  const game = new Game({
+    players: PLAYERS.map((player) => ({ ...player })),
+    rng: mulberry32(seed),
+    targetScore: 1_000_000_000,
+  });
+  game.start();
+
+  let deals = 0;
+
+  while (deals < maxDeals) {
+    const state = game.getState();
+
+    if (
+      state.phase === PHASES.BIDDING
+      && state.players.every((player) => player.score < 0)
+    ) {
+      return game;
+    }
+
+    if (state.phase === PHASES.DEAL_END) {
+      deals += 1;
+      game.nextDeal();
+    } else {
+      playSimpleDeal(game);
+    }
+  }
+
+  throw new Error('Could not reach a bidding state with all players negative.');
 }

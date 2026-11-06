@@ -127,6 +127,7 @@ export const GAME_EVENTS = Object.freeze({
   PASS: 'pass',
   PRIKUP: 'prikup',
   PRIKUP_REVEALED: 'prikuprevealed',
+  CONTRACT_RAISED: 'contractraised',
   GIFT: 'gift',
   MARRIAGE: 'marriage',
   CARD_PLAYED: 'cardplayed',

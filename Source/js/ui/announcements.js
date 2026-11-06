@@ -55,10 +55,15 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
       return declarer?.isHuman
         ? 'Прикуп раскрыт всем игрокам. Заберите три карты.'
         : `Прикуп раскрыт всем игрокам. ${declarer?.name ?? 'Играющий'} забирает карты.`;
-    case PHASES.GIVING:
+    case PHASES.GIVING: {
+      const contract = Number.isFinite(state.contract)
+        ? ` Заказ — ${state.contract}.`
+        : '';
+
       return declarer?.isHuman
-        ? 'Отдар. Выберите по одной карте для Алисы и Бориса.'
-        : `Отдар. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
+        ? `Отдар.${contract} Выберите по одной карте для Алисы и Бориса.`
+        : `Отдар.${contract} ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
+    }
     case PHASES.PLAYING: {
       const trickNumber = Math.min(state.completedTricks.length + 1, DEAL.TRICKS);
       const turn = actor?.isHuman

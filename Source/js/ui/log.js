@@ -80,6 +80,8 @@ function getIcon(entry) {
       return { symbol: '↧', isRed: false };
     case 'prikuprevealed':
       return { symbol: '↥', isRed: false };
+    case 'contractraised':
+      return { symbol: '⇑', isRed: false };
     case 'gift':
       return { symbol: '⇄', isRed: false };
     case 'marriage': {
@@ -192,6 +194,17 @@ export function createLogEntry(entry, state) {
         text,
         `${playerName(state, entry.playerId)} ${verb} прикуп — ${formatCards(entry.count)}.`,
       );
+      break;
+    }
+    case 'contractraised': {
+      const player = findPlayer(state, entry.playerId);
+      const verb = verbForPlayer(player, 'повышает', 'повышает', 'повышаете');
+
+      addText(text, `${playerName(state, entry.playerId)} ${verb} заказ: `);
+      addStrong(text, entry.previousContract);
+      addText(text, ' → ');
+      addStrong(text, entry.contract);
+      addText(text, '.');
       break;
     }
     case 'gift': {

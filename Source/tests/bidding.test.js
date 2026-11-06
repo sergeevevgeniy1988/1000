@@ -307,6 +307,7 @@ test('bidding reveals the prikup to every player before the declarer takes it', 
 
   assert.equal(taken.phase, PHASES.GIVING);
   assert.equal(taken.prikupTaken, true);
+  assert.equal(taken.raiseDecided, false);
   assert.deepEqual(taken.prikup, revealed.prikup);
   assert.equal(getStatePlayer(taken, 'alice').hand.length, 10);
   assert.equal(getStatePlayer(taken, 'human').hand.length, 7);

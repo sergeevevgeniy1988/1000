@@ -548,7 +548,16 @@ test('a full AI game finishes within a reasonable deal limit', () => {
 
         case PHASES.GIVING: {
           const playerId = state.declarerId;
-          const gifts = ais[playerId].chooseCardsToGive(game.getPlayerView(playerId));
+          const view = game.getPlayerView(playerId);
+
+          if (!state.raiseDecided && state.givenCards.length === 0) {
+            const amount = ais[playerId].chooseContractRaise(view);
+
+            game.raiseContract(playerId, amount);
+            break;
+          }
+
+          const gifts = ais[playerId].chooseCardsToGive(view);
 
           assert.equal(gifts.length, 2);
 

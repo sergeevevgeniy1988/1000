@@ -14,7 +14,7 @@ import { renderLog, resetLog } from './log.js';
 import { renderTable } from './table.js';
 import { applySpeechBubbles, createBiddingControls } from './bidding.js';
 import { createMarriageButton, createMarriageMenu } from './marriage.js';
-import { openGiftModal, openPrikupRevealModal } from './prikup.js';
+import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
 import {
   closeModal,
   getOpenModalKind,
@@ -558,13 +558,31 @@ export class Controller {
       }
       case PHASES.GIVING: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
+        const human = state.players.find((player) => player.id === this.#humanId);
+        let statusText;
+
+        if (!state.raiseDecided) {
+          if (declarer?.isHuman) {
+            if (human && human.score < 0) {
+              statusText = 'Повышение недоступно: отрицательный счёт.';
+            } else if (state.contract >= BIDDING.MAX) {
+              statusText = 'Заказ максимальный: повышать некуда.';
+            } else {
+              statusText = 'Решите, повышать ли заказ, в окне повышения.';
+            }
+          } else {
+            statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
+          }
+        } else {
+          statusText = declarer?.isHuman
+            ? `Заказ ${state.contract}. Выберите по одной карте для Алисы и Бориса в окне отдара.`
+            : `Заказ ${state.contract}. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`;
+        }
 
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
           createElement('span', {
             className: 'action-bar__status',
-            text: declarer?.isHuman
-              ? 'Выберите по одной карте для Алисы и Бориса в окне отдара.'
-              : `${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`,
+            text: statusText,
           }),
         ]));
         break;
@@ -768,6 +786,40 @@ export class Controller {
   }
 
   /**
+   * Applies the human declarer's single contract-raise decision.
+   *
+   * @param {number | null} amountOrNull New contract or null to decline.
+   * @returns {void}
+   */
+  #resolveHumanRaise(amountOrNull) {
+    if (this.#paused) {
+      return;
+    }
+
+    try {
+      this.#game.raiseContract(this.#humanId, amountOrNull);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
+    }
+  }
+
+  /**
+   * @param {number} amount
+   * @returns {void}
+   */
+  #humanRaise(amount) {
+    this.#resolveHumanRaise(amount);
+  }
+
+  /**
+   * @returns {void}
+   */
+  #humanDeclineRaise() {
+    this.#resolveHumanRaise(null);
+  }
+
+  /**
    * GameErrors are already reported through the engine's `error` event.
    *
    * @param {unknown} error
@@ -814,6 +866,20 @@ export class Controller {
     }
 
     if (state.phase === PHASES.GIVING && state.declarerId === this.#humanId) {
+      if (!state.raiseDecided && state.givenCards.length === 0) {
+        if (kind !== 'raise') {
+          closeModal({ silent: true });
+          openRaiseModal({
+            state,
+            humanId: this.#humanId,
+            onRaise: (amount) => this.#humanRaise(amount),
+            onDecline: () => this.#humanDeclineRaise(),
+          });
+        }
+
+        return;
+      }
+
       if (kind !== 'prikup') {
         closeModal({ silent: true });
         openGiftModal({
@@ -854,6 +920,7 @@ export class Controller {
     if (
       kind === 'prikup'
       || kind === 'prikup-reveal'
+      || kind === 'raise'
       || kind === 'results'
       || kind === 'gameover'
     ) {
@@ -973,6 +1040,26 @@ export class Controller {
           break;
         case PHASES.GIVING: {
           const view = this.#game.getPlayerView(actor.id);
+
+          if (!state.raiseDecided && state.givenCards.length === 0) {
+            let amount = null;
+
+            if (actor.score >= 0) {
+              try {
+                amount = ai.chooseContractRaise(view);
+              } catch (error) {
+                console.error('[1000] AI не смог выбрать повышение заказа:', error);
+              }
+            }
+
+            if (!isLegalRaise(state, amount) || actor.score < 0) {
+              amount = null;
+            }
+
+            this.#game.raiseContract(actor.id, amount);
+            break;
+          }
+
           let gift = null;
 
           try {
@@ -1141,6 +1228,23 @@ function isLegalBid(state, amount) {
   }
 
   return amount >= state.currentBid + BIDDING.STEP;
+}
+
+/**
+ * @param {object} state
+ * @param {number | null} amount
+ * @returns {boolean}
+ */
+function isLegalRaise(state, amount) {
+  if (amount === null) {
+    return true;
+  }
+
+  return typeof amount === 'number'
+    && Number.isInteger(amount)
+    && amount % BIDDING.STEP === 0
+    && amount > state.contract
+    && amount <= BIDDING.MAX;
 }
 
 /**

@@ -1,7 +1,9 @@
+import { BIDDING } from '../core/constants.js';
 import { createElement } from './dom.js';
 import { nameDative } from './format.js';
 import { createCard, sortHand } from './hand.js';
 import { openModal } from './modals.js';
+import { getRaiseOptions } from './raise.js';
 
 /**
  * Opens the mandatory public prikup reveal modal. The three cards are visible
@@ -24,8 +26,8 @@ export function openPrikupRevealModal({ state, onTakePrikup }) {
   const intro = createElement('p', {
     className: 'prikup__intro',
     text: declarer.isHuman
-      ? 'Прикуп раскрыт всем игрокам. Заберите три карты, затем отдайте по одной карте каждому сопернику.'
-      : `${declarer.name} раскрывает прикуп. Три карты видны всем игрокам; после продолжения ${declarer.name} заберёт их и отдаст карты соперникам.`,
+      ? 'Прикуп раскрыт всем игрокам. Заберите три карты, затем при желании повысьте заказ и отдайте по одной карте каждому сопернику.'
+      : `${declarer.name} раскрывает прикуп. Три карты видны всем игрокам; после продолжения ${declarer.name} заберёт их, решит, повышать ли заказ, и отдаст карты соперникам.`,
   });
   const section = createElement('section', {
     className: 'prikup__section',
@@ -70,6 +72,74 @@ export function openPrikupRevealModal({ state, onTakePrikup }) {
 }
 
 /**
+ * Opens the single contract-raise window for a human declarer after the prikup
+ * is taken and before the first gift.
+ *
+ * @param {object} options
+ * @param {object} options.state Full state snapshot.
+ * @param {string} options.humanId Human player id.
+ * @param {(amount: number) => void} options.onRaise
+ * @param {() => void} options.onDecline
+ * @returns {{ element: HTMLElement, close: () => void } | null}
+ */
+export function openRaiseModal({ state, humanId, onRaise, onDecline }) {
+  const declarer = state.players.find((player) => player.id === state.declarerId);
+
+  if (!declarer || declarer.id !== humanId) {
+    return null;
+  }
+
+  const negative = Number.isFinite(declarer.score) && declarer.score < 0;
+  const options = negative ? [] : getRaiseOptions(state.contract);
+  const body = createElement('div', { className: 'prikup' });
+  let introText;
+
+  if (negative) {
+    introText = 'Повышение недоступно: отрицательный счёт.';
+  } else if (options.length === 0) {
+    introText = `Текущий заказ — ${state.contract}. Заказ уже максимальный: повышать некуда.`;
+  } else {
+    introText = `Текущий заказ — ${state.contract}. Можно один раз повысить его до первой карты отдара, но не выше ${BIDDING.MAX}.`;
+  }
+
+  body.append(createElement('p', {
+    className: 'prikup__intro',
+    text: introText,
+  }));
+
+  const actions = [];
+
+  if (!negative) {
+    for (const amount of options) {
+      actions.push({
+        label: String(amount),
+        onClick: () => onRaise?.(amount),
+        variant: 'ghost',
+        action: `raise-${amount}`,
+      });
+    }
+  }
+
+  actions.push({
+    label: negative ? 'Продолжить' : 'Оставить заказ',
+    onClick: () => onDecline?.(),
+    variant: 'primary',
+    action: 'decline-raise',
+    autofocus: true,
+  });
+
+  return openModal({
+    kind: 'raise',
+    title: 'Повысить заказ?',
+    subtitle: negative ? 'Повышение недоступно' : 'Один раз до первой карты отдара',
+    body,
+    actions,
+    dismissible: false,
+    className: 'modal--prikup',
+  });
+}
+
+/**
  * Opens the gift modal for a human declarer after the prikup has been taken.
  * The declarer chooses exactly one card for each opponent.
  *
@@ -100,8 +170,8 @@ export function openGiftModal({ state, humanId, onConfirm }) {
   const body = createElement('div', { className: 'prikup' });
   const intro = createElement('p', {
     className: 'prikup__intro',
-    text: 'Вы забрали прикуп. Отдайте ровно по одной карте Алисе и Борису: '
-      + 'сначала выберите карту для одного соперника, затем для другого. '
+    text: `Заказ ${state.contract}. Вы забрали прикуп. Отдайте ровно по одной карте `
+      + 'Алисе и Борису: сначала выберите карту для одного соперника, затем для другого. '
       + 'Нажмите на слот соперника, чтобы перевыбрать карту.',
   });
 

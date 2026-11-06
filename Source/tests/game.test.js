@@ -179,6 +179,7 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   assert.equal(revealed.currentPlayerId, 'alice');
   assert.equal(revealed.prikupRevealed, true);
   assert.equal(revealed.prikupTaken, false);
+  assert.equal(revealed.raiseDecided, false);
   assert.equal(revealed.prikup.length, 3);
   assert.equal(getStatePlayer(revealed, 'alice').hand.length, 7);
   assert.equal(getStatePlayer(revealed, 'alice').isDeclarer, true);
@@ -202,6 +203,7 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   assert.equal(state.currentPlayerId, 'alice');
   assert.equal(state.prikupRevealed, true);
   assert.equal(state.prikupTaken, true);
+  assert.equal(state.raiseDecided, false);
   assert.equal(state.prikup.length, 3);
   assert.equal(getStatePlayer(state, 'alice').hand.length, 10);
   assert.equal(getStatePlayer(state, 'human').hand.length, 7);
@@ -233,6 +235,7 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   let nextState = game.giveCard('boris', 'S9');
 
   assert.equal(nextState.phase, PHASES.GIVING);
+  assert.equal(nextState.raiseDecided, true);
   assert.equal(getStatePlayer(nextState, 'alice').hand.length, 9);
   assert.equal(getStatePlayer(nextState, 'boris').hand.length, 8);
   assert.deepEqual(nextState.givenCards, [
@@ -386,6 +389,7 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.lastDealResult, null);
   assert.equal(state.prikupRevealed, false);
   assert.equal(state.prikupTaken, false);
+  assert.equal(state.raiseDecided, false);
   assert.equal(state.trumpSuit, null);
   assert.equal(state.completedTricks.length, 0);
 
