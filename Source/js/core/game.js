@@ -51,6 +51,7 @@ export class Game {
   #currentBid = 0;
   #activeBidderIds = /** @type {string[]} */ ([]);
   #currentBidderId = null;
+  #automaticPasses = 0;
   #givenCards = /** @type {{ fromId: string, toId: string, card: Card }[]} */ ([]);
   #trumpSuit = null;
   #trumpDeclaredBy = null;
@@ -111,9 +112,12 @@ export class Game {
   /**
    * Places a bid or passes during the BIDDING phase.
    *
-   * The opening bidder must bid exactly 100 and may not pass. Every following
-   * bid must be a multiple of five, greater than the current bid by at least
-   * five and no higher than 120. A bid of 120 ends bidding immediately.
+   * The opening bidder must bid exactly BIDDING.MIN (80) and may not pass.
+   * Every following bid must be a multiple of five, greater than the current
+   * bid by at least five and no higher than 120. A bid of 120 ends bidding
+   * immediately. A player with a negative score may only make the forced
+   * opening bid and cannot pass or raise voluntarily; such players are passed
+   * automatically by the engine when their turn comes.
    *
    * @param {string} playerId
    * @param {number | string | null} amountOrPass Bid amount, `null` or the
@@ -134,14 +138,26 @@ export class Game {
       this.#fail('NOT_YOUR_TURN', `Сейчас очередь не игрока ${player.name}.`);
     }
 
+    const negativeScore = player.score < 0;
     const passValue = typeof amountOrPass === 'string'
       ? amountOrPass.trim().toLowerCase()
       : null;
     const isPass = amountOrPass === null || passValue === 'pass' || passValue === 'пас';
 
     if (isPass) {
+      if (negativeScore) {
+        this.#fail(
+          'NEGATIVE_SCORE_CANNOT_BID',
+          `Игрок ${player.name} не может пасовать при отрицательном счёте.`,
+          { playerId: player.id, score: player.score },
+        );
+      }
+
       if (this.#currentBid === 0) {
-        this.#fail('CANNOT_PASS', 'Открывающий торги обязан сказать 100 и не может пасовать.');
+        this.#fail(
+          'CANNOT_PASS',
+          `Открывающий торги обязан сказать ${BIDDING.MIN} и не может пасовать.`,
+        );
       }
 
       this.#handlePass(player);
@@ -168,14 +184,36 @@ export class Game {
 
     if (this.#currentBid === 0) {
       if (amount !== BIDDING.MIN) {
-        this.#fail('INVALID_BID', 'Открывающая ставка должна быть ровно 100.', { amount });
+        if (negativeScore) {
+          this.#fail(
+            'NEGATIVE_SCORE_CANNOT_BID',
+            `При отрицательном счёте игрок ${player.name} может открыть торги только заявкой ${BIDDING.MIN}.`,
+            { playerId: player.id, score: player.score, amount },
+          );
+        }
+
+        this.#fail(
+          'INVALID_BID',
+          `Открывающая ставка должна быть ровно ${BIDDING.MIN}.`,
+          { amount },
+        );
       }
-    } else if (amount < this.#currentBid + BIDDING.STEP) {
-      this.#fail(
-        'INVALID_BID',
-        `Новая ставка должна быть выше текущей минимум на ${BIDDING.STEP}.`,
-        { amount, currentBid: this.#currentBid },
-      );
+    } else {
+      if (negativeScore) {
+        this.#fail(
+          'NEGATIVE_SCORE_CANNOT_BID',
+          `Игрок ${player.name} не может повышать ставку при отрицательном счёте.`,
+          { playerId: player.id, score: player.score, amount },
+        );
+      }
+
+      if (amount < this.#currentBid + BIDDING.STEP) {
+        this.#fail(
+          'INVALID_BID',
+          `Новая ставка должна быть выше текущей минимум на ${BIDDING.STEP}.`,
+          { amount, currentBid: this.#currentBid },
+        );
+      }
     }
 
     this.#handleBid(player, amount);
@@ -512,6 +550,7 @@ export class Game {
     this.#currentBid = 0;
     this.#activeBidderIds = [];
     this.#currentBidderId = null;
+    this.#automaticPasses = 0;
     this.#givenCards = [];
     this.#trumpSuit = null;
     this.#trumpDeclaredBy = null;
@@ -546,10 +585,70 @@ export class Game {
       return;
     }
 
-    const nextBidderId = this.#findNextActiveBidder(player.id);
+    this.#advanceBidding(player.id);
+  }
+
+  /**
+   * Applies a voluntary pass and advances bidding or finishes it.
+   *
+   * @param {object} player
+   */
+  #handlePass(player) {
+    this.#markPassed(player, false);
+    this.#advanceBidding(player.id);
+  }
+
+  /**
+   * Marks a player as passed and emits the public pass event.
+   *
+   * @param {object} player
+   * @param {boolean} automatic
+   */
+  #markPassed(player, automatic) {
+    player.passed = true;
+    this.#activeBidderIds = this.#activeBidderIds.filter((id) => id !== player.id);
+
+    if (automatic) {
+      this.#automaticPasses += 1;
+    }
+
+    const payload = automatic
+      ? deepFreeze({ playerId: player.id, automatic: true })
+      : deepFreeze({ playerId: player.id });
+
+    this.#addLog('pass', payload);
+    this.#emitter.emit(GAME_EVENTS.PASS, payload);
+  }
+
+  /**
+   * Moves the turn to the next active player, automatically passing negative
+   * players. Finishes bidding when only one active player remains.
+   *
+   * @param {string} fromPlayerId
+   */
+  #advanceBidding(fromPlayerId) {
+    if (this.#activeBidderIds.length === 1) {
+      this.#finishBidding(this.#activeBidderIds[0]);
+      return;
+    }
+
+    let nextBidderId = this.#findNextActiveBidder(fromPlayerId);
+
+    while (nextBidderId !== null && this.#shouldAutoPass(nextBidderId)) {
+      const nextBidder = this.#getPlayer(nextBidderId);
+
+      this.#markPassed(nextBidder, true);
+
+      if (this.#activeBidderIds.length === 1) {
+        this.#finishBidding(this.#activeBidderIds[0]);
+        return;
+      }
+
+      nextBidderId = this.#findNextActiveBidder(nextBidderId);
+    }
 
     if (nextBidderId === null) {
-      this.#finishBidding(player.id);
+      this.#finishBidding(this.#activeBidderIds[0]);
       return;
     }
 
@@ -557,32 +656,22 @@ export class Game {
   }
 
   /**
-   * Applies a pass and advances bidding or finishes it.
+   * Returns true when the player must be passed automatically because of a
+   * negative score. The forced opening bid is never auto-passed.
    *
-   * @param {object} player
+   * @param {string} playerId
+   * @returns {boolean}
    */
-  #handlePass(player) {
-    player.passed = true;
-    this.#activeBidderIds = this.#activeBidderIds.filter((id) => id !== player.id);
-
-    const payload = deepFreeze({ playerId: player.id });
-
-    this.#addLog('pass', payload);
-    this.#emitter.emit(GAME_EVENTS.PASS, payload);
-
-    if (this.#activeBidderIds.length === 1) {
-      this.#finishBidding(this.#activeBidderIds[0]);
-      return;
+  #shouldAutoPass(playerId) {
+    if (this.#automaticPasses >= PLAYER_COUNT) {
+      return false;
     }
 
-    const nextBidderId = this.#findNextActiveBidder(player.id);
-
-    if (nextBidderId === null) {
-      this.#finishBidding(this.#activeBidderIds[0]);
-      return;
+    if (this.#currentBid === 0) {
+      return false;
     }
 
-    this.#currentBidderId = nextBidderId;
+    return this.#getPlayer(playerId).score < 0;
   }
 
   /**

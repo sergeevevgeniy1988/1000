@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GAME_EVENTS, PHASES } from '../js/core/constants.js';
+import { BIDDING, GAME_EVENTS, PHASES } from '../js/core/constants.js';
 import { createDeck } from '../js/core/deck.js';
 import { GameError } from '../js/core/errors.js';
 import { Game } from '../js/core/game.js';
@@ -43,7 +43,7 @@ function expectError(action, code) {
 }
 
 function bidForAlice(game) {
-  game.bid('alice', 100);
+  game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   return game.bid('human', 'pass');
 }
@@ -315,10 +315,10 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 180);
   assert.equal(state.lastDealResult.dealNumber, 1);
   assert.equal(state.lastDealResult.declarerId, 'alice');
-  assert.equal(state.lastDealResult.contract, 100);
+  assert.equal(state.lastDealResult.contract, BIDDING.MIN);
   assert.equal(state.lastDealResult.contractMet, true);
-  assert.equal(resultFor(state.lastDealResult, 'alice').delta, 100);
-  assert.equal(getStatePlayer(state, 'alice').score, 100);
+  assert.equal(resultFor(state.lastDealResult, 'alice').delta, BIDDING.MIN);
+  assert.equal(getStatePlayer(state, 'alice').score, BIDDING.MIN);
 
   for (const player of state.players) {
     const result = resultFor(state.lastDealResult, player.id);
@@ -416,7 +416,7 @@ test('a player who takes no tricks receives a bolt and the engine keeps scores',
   assert.equal(getStatePlayer(state, 'alice').trickPoints, 120);
   assert.equal(getStatePlayer(state, 'boris').tricksWon, 0);
   assert.equal(getStatePlayer(state, 'human').tricksWon, 0);
-  assert.equal(getStatePlayer(state, 'alice').score, 100);
+  assert.equal(getStatePlayer(state, 'alice').score, BIDDING.MIN);
   assert.equal(getStatePlayer(state, 'boris').score, 0);
   assert.equal(getStatePlayer(state, 'human').score, 0);
   assert.equal(getStatePlayer(state, 'boris').bolts, 1);
@@ -462,7 +462,7 @@ test('a tie at the target keeps the game going for another deal', () => {
   assert.equal(getStatePlayer(state, 'alice').tricksWon, 4);
   assert.equal(getStatePlayer(state, 'boris').tricksWon, 2);
   assert.equal(getStatePlayer(state, 'human').tricksWon, 2);
-  assert.equal(getStatePlayer(state, 'alice').score, -100);
+  assert.equal(getStatePlayer(state, 'alice').score, -BIDDING.MIN);
   assert.equal(getStatePlayer(state, 'boris').score, 30);
   assert.equal(getStatePlayer(state, 'human').score, 30);
   assert.equal(state.lastDealResult.contractMet, false);
@@ -477,7 +477,7 @@ test('a tie at the target keeps the game going for another deal', () => {
   assert.equal(nextState.phase, PHASES.BIDDING);
   assert.equal(nextState.dealNumber, 2);
   assert.equal(nextState.dealerIndex, 1);
-  assert.equal(getStatePlayer(nextState, 'alice').score, -100);
+  assert.equal(getStatePlayer(nextState, 'alice').score, -BIDDING.MIN);
   assert.equal(getStatePlayer(nextState, 'boris').score, 30);
   assert.equal(getStatePlayer(nextState, 'human').score, 30);
 });
@@ -487,7 +487,7 @@ test('reaching the target with an outright lead finishes the game', () => {
     hands: DOMINATING_HANDS,
     prikup: DOMINATING_PRIKUP,
     dealerIndex: 0,
-    targetScore: 100,
+    targetScore: BIDDING.MIN,
   });
   const events = {
     cardPlayed: 0,
@@ -519,8 +519,8 @@ test('reaching the target with an outright lead finishes the game', () => {
   assert.equal(state.phase, PHASES.GAME_OVER);
   assert.equal(state.winnerId, 'alice');
   assert.equal(state.lastDealResult.gameResult.isOver, true);
-  assert.equal(state.lastDealResult.gameResult.topScore, 100);
-  assert.equal(state.lastDealResult.gameResult.targetScore, 100);
+  assert.equal(state.lastDealResult.gameResult.topScore, BIDDING.MIN);
+  assert.equal(state.lastDealResult.gameResult.targetScore, BIDDING.MIN);
   assert.deepEqual(state.lastDealResult.gameResult.leaderIds, ['alice']);
 
   assert.equal(events.cardPlayed, 24);
@@ -530,7 +530,7 @@ test('reaching the target with an outright lead finishes the game', () => {
   assert.equal(state.log.filter((entry) => entry.type === 'gameover').length, 1);
 
   expectError(() => game.nextDeal(), 'INVALID_PHASE');
-  expectError(() => game.bid('alice', 100), 'INVALID_PHASE');
+  expectError(() => game.bid('alice', BIDDING.MIN), 'INVALID_PHASE');
   expectError(() => game.declareMarriage('alice', 'H'), 'INVALID_PHASE');
 });
 
@@ -539,7 +539,7 @@ test('seeded games with the same script produce identical full deals', () => {
     let state = game.getState();
     const [opener, second, third] = state.activeBidderIds;
 
-    game.bid(opener, 100);
+    game.bid(opener, BIDDING.MIN);
     game.bid(second, 'pass');
     game.bid(third, 'pass');
 

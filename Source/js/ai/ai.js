@@ -512,7 +512,8 @@ function chooseFollowCard(view, actorId, hand, legal, settings) {
 
 /**
  * Chooses a bid for the current auction. The opening bidder is forced to say
- * exactly 100; everyone else may pass or raise by a legal step.
+ * exactly BIDDING.MIN (80); everyone else may pass or raise by a legal step.
+ * A player with a negative score can only make the forced opening bid.
  *
  * @param {object} view Player view of the bidding AI.
  * @param {number | null} [currentBid] Current bid from the view.
@@ -534,10 +535,14 @@ export function chooseBid(view, currentBid = view?.currentBid, options = {}) {
     }
 
     const actorId = resolveActorId(view, 'bid', settings);
-    const { hand } = getSelfHand(view, actorId);
+    const { self, hand } = getSelfHand(view, actorId);
 
     if (knownBid === 0) {
       return BIDDING.MIN;
+    }
+
+    if (Number.isFinite(self.score) && self.score < 0) {
+      return null;
     }
 
     if (knownBid >= BIDDING.MAX) {

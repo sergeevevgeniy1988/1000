@@ -40,6 +40,68 @@ function createAIs(seed) {
   );
 }
 
+function createBiddingView({ currentBid = 0, score = 0 } = {}) {
+  return {
+    phase: PHASES.BIDDING,
+    currentBid,
+    currentBidderId: 'alice',
+    contract: null,
+    declarerId: null,
+    trumpSuit: null,
+    completedTricks: [],
+    currentTrick: [],
+    givenCards: [],
+    log: [],
+    players: [
+      {
+        id: 'alice',
+        name: 'Алиса',
+        isHuman: false,
+        score,
+        hand: ['S9', 'SJ', 'SQ', 'SK', 'S10', 'SA', 'H9'],
+        cardCount: 7,
+        bid: null,
+        passed: false,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+      {
+        id: 'boris',
+        name: 'Борис',
+        isHuman: false,
+        score: 0,
+        hand: [],
+        cardCount: 7,
+        bid: null,
+        passed: false,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+      {
+        id: 'human',
+        name: 'Вы',
+        isHuman: true,
+        score: 0,
+        hand: [],
+        cardCount: 7,
+        bid: null,
+        passed: false,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+    ],
+  };
+}
+
 function legalCardsFromView(view) {
   const self = view.players.find((player) => player.id === view.currentPlayerId);
   const leadSuit = view.currentTrick.length === 0
@@ -87,8 +149,8 @@ function runGifts(game, ais) {
 }
 
 /**
- * Runs a deterministic bidding round where the opener takes 100 and both
- * opponents pass, then gives two lowest cards away.
+ * Runs a deterministic bidding round where the opener takes the minimum bid
+ * and both opponents pass, then gives two lowest cards away.
  */
 function dealToPlaying(game) {
   const openerId = game.getState().currentBidderId;
@@ -182,7 +244,7 @@ test('AI chooses only legal cards across 100 random positions', () => {
   }
 });
 
-test('AI bids within 100-120, in steps of five and never passes the opener', () => {
+test('AI bids within 80-120, in steps of five and never passes the opener', () => {
   for (let seed = 1; seed <= 100; seed += 1) {
     const game = createSeededGame(seed);
     const ais = createAIs(seed);
@@ -224,6 +286,15 @@ test('AI bids within 100-120, in steps of five and never passes the opener', () 
   }
 });
 
+test('AI opens 80 with a negative score and refuses to raise afterwards', () => {
+  const ai = createAI({ playerId: 'alice', rng: () => 0.5 });
+  const openingView = createBiddingView({ currentBid: 0, score: -80 });
+  const raiseView = createBiddingView({ currentBid: 80, score: -80 });
+
+  assert.equal(ai.chooseBid(openingView, 0), BIDDING.MIN);
+  assert.equal(ai.chooseBid(raiseView, 80), null);
+});
+
 test('AI gives exactly one card to each opponent and keeps its marriages', () => {
   for (let seed = 1; seed <= 100; seed += 1) {
     const game = createSeededGame(seed);
@@ -260,7 +331,7 @@ test('AI gives exactly one card to each opponent and keeps its marriages', () =>
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  game.bid('alice', 100);
+  game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   game.bid('human', 'pass');
 
@@ -285,7 +356,7 @@ test('AI declares a marriage when leading after the first trick', () => {
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  game.bid('alice', 100);
+  game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   game.bid('human', 'pass');
 

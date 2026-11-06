@@ -894,6 +894,12 @@ export class Controller {
 
       switch (state.phase) {
         case PHASES.BIDDING: {
+          if (actor.score < 0 && state.currentBid > 0) {
+            // Negative-score players are passed by the engine before their turn.
+            // Never let the UI send a bid or a voluntary pass for them.
+            break;
+          }
+
           const view = this.#game.getPlayerView(actor.id);
           let amount = null;
 

@@ -158,7 +158,11 @@ export function createLogEntry(entry, state) {
       break;
     }
     case 'pass': {
-      addText(text, `${playerName(state, entry.playerId)}: Пас.`);
+      const suffix = entry.automatic
+        ? ' Пас автоматически: отрицательный счёт.'
+        : ' Пас.';
+
+      addText(text, `${playerName(state, entry.playerId)}:${suffix}`);
       break;
     }
     case 'prikup': {

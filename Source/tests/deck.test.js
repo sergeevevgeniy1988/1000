@@ -119,7 +119,7 @@ test('game constants are frozen and contain the expected limits', () => {
   }
 
   assert.deepEqual(Object.values(MARRIAGE_BONUSES), [40, 60, 80, 100]);
-  assert.equal(BIDDING.MIN, 100);
+  assert.equal(BIDDING.MIN, 80);
   assert.equal(BIDDING.MAX, 120);
   assert.equal(BIDDING.STEP, 5);
   assert.equal(TARGET_SCORE, 1000);

@@ -35,7 +35,11 @@ test('engine errors become short Russian messages without internal ids', () => {
   assert.match(getActionErrorMessage({ code: 'ILLEGAL_CARD', message: 'Карта S10...' }), /масти/);
   assert.equal(
     getActionErrorMessage({ code: 'CANNOT_PASS' }),
-    'Открывающий торги обязан сказать 100 и не может пасовать.',
+    'Открывающий торги обязан сказать 80 и не может пасовать.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'NEGATIVE_SCORE_CANNOT_BID' }),
+    'При отрицательном счёте нельзя повышать ставку или пасовать. Можно только открыть 80.',
   );
   assert.match(getActionErrorMessage({ code: 'MARRIAGE_NOT_ALLOWED' }), /первой завершённой взятки/);
   assert.equal(getActionErrorMessage({ code: 'NOT_YOUR_TURN' }), 'Сейчас не ваш ход. Дождитесь своей очереди.');

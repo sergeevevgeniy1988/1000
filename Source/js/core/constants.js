@@ -93,7 +93,7 @@ export const PHASES = Object.freeze({
 
 /** Bidding limits. Every bid must be within the range and divisible by the step. */
 export const BIDDING = Object.freeze({
-  MIN: 100,
+  MIN: 80,
   MAX: 120,
   STEP: 5,
 });
