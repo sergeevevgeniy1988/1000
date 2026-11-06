@@ -46,6 +46,7 @@ export class Game {
   #firstBidderId = null;
   #prikup = /** @type {Card[]} */ ([]);
   #prikupTaken = false;
+  #prikupRevealed = false;
   #contract = null;
   #declarerId = null;
   #currentBid = 0;
@@ -217,6 +218,51 @@ export class Game {
     }
 
     this.#handleBid(player, amount);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Moves the publicly revealed prikup into the declarer's hand and opens the
+   * GIVING phase. Only the declarer may take the prikup, and only once.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When the prikup cannot be taken.
+   */
+  takePrikup(playerId) {
+    const player = this.#getPlayer(playerId);
+
+    if (this.#prikupTaken && this.#phase === PHASES.GIVING) {
+      this.#fail('PRIKUP_ALREADY_TAKEN', 'Прикуп уже взят в этой раздаче.');
+    }
+
+    this.#assertPhase(PHASES.PRIKUP, 'takePrikup');
+
+    if (player.id !== this.#declarerId) {
+      const declarer = this.#getPlayer(this.#declarerId);
+
+      this.#fail(
+        'NOT_DECLARER',
+        `Прикуп может забрать только играющий ${declarer.name}.`,
+        { playerId: player.id, declarerId: this.#declarerId },
+      );
+    }
+
+    const cards = this.#prikup.map((card) => card.id);
+
+    player.hand.push(...this.#prikup);
+    this.#prikupTaken = true;
+    this.#phase = PHASES.GIVING;
+
+    const payload = deepFreeze({
+      declarerId: player.id,
+      cards,
+      handSize: player.hand.length,
+    });
+
+    this.#addLog('prikup', { playerId: player.id, count: cards.length });
+    this.#emitter.emit(GAME_EVENTS.PRIKUP, payload);
 
     return this.#emitStateChange();
   }
@@ -479,8 +525,9 @@ export class Game {
   }
 
   /**
-   * Returns a frozen snapshot that hides every other player's hand, the hidden
-   * prikup and the deck order. This is the only state AI code may receive.
+   * Returns a frozen snapshot that hides every other player's hand, the prikup
+   * until it is publicly revealed, and the deck order. This is the only state
+   * AI code may receive.
    *
    * @param {string} playerId
    * @returns {object}
@@ -545,6 +592,7 @@ export class Game {
 
     this.#prikup = [];
     this.#prikupTaken = false;
+    this.#prikupRevealed = false;
     this.#contract = null;
     this.#declarerId = null;
     this.#currentBid = 0;
@@ -675,38 +723,38 @@ export class Game {
   }
 
   /**
-   * Finishes bidding, assigns the contract and moves the prikup to the
-   * declarer. The PRIKUP event is emitted while the phase is PRIKUP; immediately
-   * afterwards the phase becomes GIVING.
+   * Finishes bidding, assigns the contract and reveals the prikup to every
+   * player. The declarer takes the revealed cards separately with
+   * {@link Game#takePrikup}.
    *
    * @param {string} winnerId
    */
   #finishBidding(winnerId) {
-    const winner = this.#getPlayer(winnerId);
-
     this.#phase = PHASES.PRIKUP;
     this.#declarerId = winnerId;
     this.#contract = this.#currentBid;
     this.#activeBidderIds = [winnerId];
     this.#currentBidderId = null;
+    this.#prikupTaken = false;
+    this.#prikupRevealed = true;
 
     for (const player of this.#players) {
       player.isDeclarer = player.id === winnerId;
     }
 
     const prikupCards = this.#prikup.map((card) => card.id);
-    winner.hand.push(...this.#prikup);
-    this.#prikupTaken = true;
-
     const payload = deepFreeze({
       declarerId: winnerId,
       cards: prikupCards,
-      handSize: winner.hand.length,
+      contract: this.#contract,
     });
 
-    this.#addLog('prikup', { playerId: winnerId, count: prikupCards.length });
-    this.#emitter.emit(GAME_EVENTS.PRIKUP, payload);
-    this.#phase = PHASES.GIVING;
+    this.#addLog('prikuprevealed', {
+      playerId: winnerId,
+      cards: prikupCards,
+      count: prikupCards.length,
+    });
+    this.#emitter.emit(GAME_EVENTS.PRIKUP_REVEALED, payload);
   }
 
   /**
@@ -837,8 +885,7 @@ export class Game {
     const dealer = this.#dealerIndex === null
       ? null
       : this.#players[this.#dealerIndex];
-    const prikupVisible = viewerId === null
-      || (this.#prikupTaken && viewerId === this.#declarerId);
+    const prikupVisible = viewerId === null || this.#prikupRevealed;
 
     const players = this.#players.map((player) => {
       const handVisible = viewerId === null || viewerId === player.id;
@@ -870,6 +917,7 @@ export class Game {
       firstBidderId: this.#firstBidderId,
       players,
       prikup: prikupVisible ? this.#prikup.map((card) => card.id) : [],
+      prikupRevealed: this.#prikupRevealed,
       prikupTaken: this.#prikupTaken,
       contract: this.#contract,
       declarerId: this.#declarerId,

@@ -4,11 +4,74 @@ import { createCard, sortHand } from './hand.js';
 import { openModal } from './modals.js';
 
 /**
- * Opens the combined prikup and gift modal for a human declarer.
+ * Opens the mandatory public prikup reveal modal. The three cards are visible
+ * to every player and stay out of the declarer's hand until the action button
+ * is pressed.
  *
- * The engine immediately moves the prikup into the declarer's hand, so the
- * modal shows the original three prikup cards for context and the full
- * ten-card hand for the actual choice. Gifts are applied only on confirmation.
+ * @param {object} options
+ * @param {object} options.state Full state snapshot.
+ * @param {() => void} options.onTakePrikup Called when the prikup is taken.
+ * @returns {{ element: HTMLElement, close: () => void } | null}
+ */
+export function openPrikupRevealModal({ state, onTakePrikup }) {
+  const declarer = state.players.find((player) => player.id === state.declarerId);
+
+  if (!declarer || !Array.isArray(state.prikup) || state.prikup.length === 0) {
+    return null;
+  }
+
+  const body = createElement('div', { className: 'prikup' });
+  const intro = createElement('p', {
+    className: 'prikup__intro',
+    text: declarer.isHuman
+      ? 'Прикуп раскрыт всем игрокам. Заберите три карты, затем отдайте по одной карте каждому сопернику.'
+      : `${declarer.name} раскрывает прикуп. Три карты видны всем игрокам; после продолжения ${declarer.name} заберёт их и отдаст карты соперникам.`,
+  });
+  const section = createElement('section', {
+    className: 'prikup__section',
+    attrs: { 'aria-label': 'Карты прикупа' },
+  });
+  const sectionTitle = createElement('h3', {
+    className: 'prikup__section-title',
+    text: 'Прикуп',
+  });
+  const cards = createElement('div', { className: 'prikup__prikup-cards' });
+
+  for (const cardId of state.prikup) {
+    cards.append(createCard(cardId));
+  }
+
+  section.append(sectionTitle, cards);
+  body.append(intro, section);
+
+  const footer = createElement('div', { className: 'prikup__footer' });
+
+  footer.append(createElement('p', {
+    className: 'prikup__footer-hint',
+    text: 'Карты прикупа видны всем игрокам.',
+  }));
+
+  return openModal({
+    kind: 'prikup-reveal',
+    title: 'Прикуп',
+    subtitle: 'Три карты раскрыты всем игрокам',
+    body,
+    footer,
+    actions: [{
+      label: declarer.isHuman ? 'Забрать прикуп' : 'Продолжить',
+      onClick: () => onTakePrikup?.(),
+      variant: 'primary',
+      action: 'take-prikup',
+      autofocus: true,
+    }],
+    dismissible: false,
+    className: 'modal--prikup',
+  });
+}
+
+/**
+ * Opens the gift modal for a human declarer after the prikup has been taken.
+ * The declarer chooses exactly one card for each opponent.
  *
  * @param {object} options
  * @param {object} options.state Full state snapshot.
@@ -16,7 +79,7 @@ import { openModal } from './modals.js';
  * @param {(gifts: { toPlayerId: string, cardId: string }[]) => void} options.onConfirm
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openPrikupModal({ state, humanId, onConfirm }) {
+export function openGiftModal({ state, humanId, onConfirm }) {
   const human = state.players.find((player) => player.id === humanId);
 
   if (!human) {
@@ -41,22 +104,6 @@ export function openPrikupModal({ state, humanId, onConfirm }) {
       + 'сначала выберите карту для одного соперника, затем для другого. '
       + 'Нажмите на слот соперника, чтобы перевыбрать карту.',
   });
-
-  const prikupSection = createElement('section', {
-    className: 'prikup__section',
-    attrs: { 'aria-label': 'Карты прикупа' },
-  });
-  const prikupTitle = createElement('h3', {
-    className: 'prikup__section-title',
-    text: 'Прикуп',
-  });
-  const prikupCards = createElement('div', { className: 'prikup__prikup-cards' });
-
-  for (const cardId of state.prikup) {
-    prikupCards.append(createCard(cardId));
-  }
-
-  prikupSection.append(prikupTitle, prikupCards);
 
   const handSection = createElement('section', {
     className: 'prikup__section',
@@ -109,7 +156,7 @@ export function openPrikupModal({ state, humanId, onConfirm }) {
   const giftSlots = createElement('div', { className: 'gift-slots' });
 
   giftSection.append(giftTitle, giftSlots);
-  body.append(intro, prikupSection, handSection, giftSection);
+  body.append(intro, handSection, giftSection);
 
   const footer = createElement('div', { className: 'prikup__footer' });
   const footerInfo = createElement('p', {
@@ -272,7 +319,7 @@ export function openPrikupModal({ state, humanId, onConfirm }) {
 
   return openModal({
     kind: 'prikup',
-    title: 'Прикуп и отдар',
+    title: 'Отдар',
     subtitle: 'Одна карта Алисе, одна карта Борису',
     body,
     footer,

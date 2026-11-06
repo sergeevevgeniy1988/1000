@@ -5,7 +5,7 @@ import { mulberry32 } from '../core/rng.js';
 import { getLegalCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { clearElement, createElement } from './dom.js';
-import { formatCards, getPhaseName, nameGenitive } from './format.js';
+import { getPhaseName, nameGenitive } from './format.js';
 import { createAnnouncer, getPhaseAnnouncement } from './announcements.js';
 import { getActionErrorMessage } from './errors.js';
 import { captureFocus, focusFirstLegalCard, restoreFocus } from './focus.js';
@@ -14,7 +14,7 @@ import { renderLog, resetLog } from './log.js';
 import { renderTable } from './table.js';
 import { applySpeechBubbles, createBiddingControls } from './bidding.js';
 import { createMarriageButton, createMarriageMenu } from './marriage.js';
-import { openPrikupModal } from './prikup.js';
+import { openGiftModal, openPrikupRevealModal } from './prikup.js';
 import {
   closeModal,
   getOpenModalKind,
@@ -338,8 +338,7 @@ export class Controller {
   }
 
   /**
-   * Announces an AI prikup with a short visible notice. The prikup contents
-   * themselves are never rendered.
+   * Announces that an AI declarer took the already revealed prikup.
    *
    * @param {{ declarerId: string, cards: string[], handSize: number }} payload
    * @returns {void}
@@ -348,7 +347,7 @@ export class Controller {
     const declarer = this.#players.find((player) => player.id === payload.declarerId);
 
     if (declarer && !declarer.isHuman) {
-      showToast(`${declarer.name} берёт прикуп — ${formatCards(payload.cards.length)}.`, 'info');
+      showToast(`${declarer.name} забирает прикуп.`, 'info');
     }
   }
 
@@ -544,6 +543,19 @@ export class Controller {
         }));
         break;
       }
+      case PHASES.PRIKUP: {
+        const declarer = state.players.find((player) => player.id === state.declarerId);
+
+        bar.append(createElement('div', { className: 'action-bar__group' }, ...[
+          createElement('span', {
+            className: 'action-bar__status',
+            text: declarer?.isHuman
+              ? 'Прикуп раскрыт — заберите три карты.'
+              : `Прикуп раскрыт. ${declarer?.name ?? 'Играющий'} забирает карты.`,
+          }),
+        ]));
+        break;
+      }
       case PHASES.GIVING: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
 
@@ -551,8 +563,8 @@ export class Controller {
           createElement('span', {
             className: 'action-bar__status',
             text: declarer?.isHuman
-              ? 'Выберите по одной карте для Алисы и Бориса в окне прикупа.'
-              : `${declarer?.name ?? 'Играющий'} забирает прикуп и отдаёт карты…`,
+              ? 'Выберите по одной карте для Алисы и Бориса в окне отдара.'
+              : `${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`,
           }),
         ]));
         break;
@@ -780,7 +792,8 @@ export class Controller {
     }
 
     const kind = getOpenModalKind();
-    const mandatoryModal = (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
+    const mandatoryModal = state.phase === PHASES.PRIKUP
+      || (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
       || state.phase === PHASES.DEAL_END
       || state.phase === PHASES.GAME_OVER;
 
@@ -788,10 +801,22 @@ export class Controller {
       this.#elements.logDrawer?.close({ restoreFocus: false });
     }
 
+    if (state.phase === PHASES.PRIKUP) {
+      if (kind !== 'prikup-reveal') {
+        closeModal({ silent: true });
+        openPrikupRevealModal({
+          state,
+          onTakePrikup: () => this.#takePrikup(state.declarerId),
+        });
+      }
+
+      return;
+    }
+
     if (state.phase === PHASES.GIVING && state.declarerId === this.#humanId) {
       if (kind !== 'prikup') {
         closeModal({ silent: true });
-        openPrikupModal({
+        openGiftModal({
           state,
           humanId: this.#humanId,
           onConfirm: (gifts) => this.#applyHumanGifts(gifts),
@@ -826,8 +851,33 @@ export class Controller {
       return;
     }
 
-    if (kind === 'prikup' || kind === 'results' || kind === 'gameover') {
+    if (
+      kind === 'prikup'
+      || kind === 'prikup-reveal'
+      || kind === 'results'
+      || kind === 'gameover'
+    ) {
       closeModal({ silent: true });
+    }
+  }
+
+  /**
+   * Takes the revealed prikup for the declarer. The controller drives this for
+   * both human and AI declarers because the reveal modal is mandatory.
+   *
+   * @param {string | null} declarerId
+   * @returns {void}
+   */
+  #takePrikup(declarerId) {
+    if (!this.#game || typeof declarerId !== 'string') {
+      return;
+    }
+
+    try {
+      this.#game.takePrikup(declarerId);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
     }
   }
 
@@ -852,6 +902,8 @@ export class Controller {
     const actor = state.currentPlayerId
       ? state.players.find((player) => player.id === state.currentPlayerId)
       : null;
+    // PRIKUP is intentionally excluded: the mandatory reveal modal lets the
+    // controller take the prikup for both human and AI declarers.
     const playablePhase = state.phase === PHASES.BIDDING
       || state.phase === PHASES.GIVING
       || state.phase === PHASES.PLAYING;
@@ -916,6 +968,9 @@ export class Controller {
           this.#game.bid(actor.id, amount);
           break;
         }
+        case PHASES.PRIKUP:
+          // The controller takes the revealed prikup from the mandatory modal.
+          break;
         case PHASES.GIVING: {
           const view = this.#game.getPlayerView(actor.id);
           let gift = null;

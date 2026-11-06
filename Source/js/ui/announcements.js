@@ -52,10 +52,12 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
       return `${turn}${bid}`;
     }
     case PHASES.PRIKUP:
-      return `Прикуп. ${declarer?.isHuman ? 'Вы забираете карты.' : `${declarer?.name ?? 'Играющий'} забирает карты.`}`;
+      return declarer?.isHuman
+        ? 'Прикуп раскрыт всем игрокам. Заберите три карты.'
+        : `Прикуп раскрыт всем игрокам. ${declarer?.name ?? 'Играющий'} забирает карты.`;
     case PHASES.GIVING:
       return declarer?.isHuman
-        ? 'Прикуп и отдар. Выберите по одной карте для Алисы и Бориса.'
+        ? 'Отдар. Выберите по одной карте для Алисы и Бориса.'
         : `Отдар. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
     case PHASES.PLAYING: {
       const trickNumber = Math.min(state.completedTricks.length + 1, DEAL.TRICKS);

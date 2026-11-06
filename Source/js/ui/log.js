@@ -78,6 +78,8 @@ function getIcon(entry) {
       return { symbol: '—', isRed: false };
     case 'prikup':
       return { symbol: '↧', isRed: false };
+    case 'prikuprevealed':
+      return { symbol: '↥', isRed: false };
     case 'gift':
       return { symbol: '⇄', isRed: false };
     case 'marriage': {
@@ -165,10 +167,30 @@ export function createLogEntry(entry, state) {
       addText(text, `${playerName(state, entry.playerId)}:${suffix}`);
       break;
     }
+    case 'prikuprevealed': {
+      const player = findPlayer(state, entry.playerId);
+      const verb = verbForPlayer(player, 'раскрывает', 'раскрывает', 'раскрываете');
+
+      addText(text, `${playerName(state, entry.playerId)} ${verb} прикуп: `);
+
+      entry.cards.forEach((cardId, index) => {
+        if (index > 0) {
+          addText(text, ', ');
+        }
+
+        text.append(createCardChip(cardId));
+      });
+
+      addText(text, '.');
+      break;
+    }
     case 'prikup': {
+      const player = findPlayer(state, entry.playerId);
+      const verb = verbForPlayer(player, 'берёт', 'берёт', 'берёте');
+
       addText(
         text,
-        `${playerName(state, entry.playerId)} берёт прикуп — ${formatCards(entry.count)}.`,
+        `${playerName(state, entry.playerId)} ${verb} прикуп — ${formatCards(entry.count)}.`,
       );
       break;
     }

@@ -68,6 +68,25 @@ test('phase announcements describe the human bidding turn and current bid', () =
   );
 });
 
+test('phase announcements describe the public prikup reveal', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PRIKUP,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+    })),
+    'Прикуп раскрыт всем игрокам. Заберите три карты.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PRIKUP,
+      currentPlayerId: 'alice',
+      declarerId: 'alice',
+    })),
+    'Прикуп раскрыт всем игрокам. Алиса забирает карты.',
+  );
+});
+
 test('phase announcements describe trump, trick progress and deal results', () => {
   const playing = createState({
     phase: PHASES.PLAYING,

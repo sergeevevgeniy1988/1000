@@ -50,6 +50,7 @@ function playDealEndingWithAliceAtMinusEighty(game) {
   game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   game.bid('human', 'pass');
+  game.takePrikup('alice');
 
   game.giveCard('boris', 'SK');
   game.giveCard('human', 'S9');
@@ -88,6 +89,8 @@ function playSimpleDeal(game) {
       } else {
         throw new Error('A negative player must be passed automatically.');
       }
+    } else if (state.phase === PHASES.PRIKUP) {
+      game.takePrikup(state.declarerId);
     } else if (state.phase === PHASES.GIVING) {
       const declarer = state.players.find((player) => player.id === state.declarerId);
       const received = new Set(state.givenCards.map((gift) => gift.toId));
@@ -189,6 +192,7 @@ test('the game starts only once and actions are unavailable in IDLE', () => {
   assert.ok(idle.players.every((player) => player.hand.length === 0));
 
   expectError(() => game.bid('alice', 80), 'INVALID_PHASE');
+  expectError(() => game.takePrikup('alice'), 'INVALID_PHASE');
   expectError(() => game.playCard('alice', 'S9'), 'INVALID_PHASE');
   expectError(() => game.nextDeal(), 'INVALID_PHASE');
 
@@ -200,6 +204,7 @@ test('the opener must bid exactly 80, cannot pass and bids follow the step rule'
   const game = createBiddingGame();
 
   expectError(() => game.bid('alice', 'pass'), 'CANNOT_PASS');
+  expectError(() => game.takePrikup('alice'), 'INVALID_PHASE');
   expectError(() => game.bid('alice', 75), 'INVALID_BID');
   expectError(() => game.bid('alice', 85), 'INVALID_BID');
   expectError(() => game.bid('alice', 100), 'INVALID_BID');
@@ -228,14 +233,24 @@ test('the opener must bid exactly 80, cannot pass and bids follow the step rule'
   assert.equal(state.currentBidderId, 'alice');
 
   state = game.bid('alice', 120);
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(state.currentBid, BIDDING.MAX);
   assert.equal(state.contract, BIDDING.MAX);
   assert.equal(state.declarerId, 'alice');
   assert.deepEqual(state.activeBidderIds, ['alice']);
   assert.equal(state.currentBidderId, null);
-  assert.equal(getStatePlayer(state, 'alice').hand.length, 10);
+  assert.equal(getStatePlayer(state, 'alice').hand.length, 7);
   assert.equal(getStatePlayer(state, 'alice').isDeclarer, true);
+  assert.equal(state.prikupRevealed, true);
+  assert.equal(state.prikupTaken, false);
+
+  expectError(() => game.takePrikup('human'), 'NOT_DECLARER');
+  expectError(() => game.giveCard('boris', 'S9'), 'INVALID_PHASE');
+
+  state = game.takePrikup('alice');
+  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.prikupTaken, true);
+  assert.equal(getStatePlayer(state, 'alice').hand.length, 10);
 
   expectError(() => game.bid('alice', 120), 'INVALID_PHASE');
 
@@ -244,6 +259,63 @@ test('the opener must bid exactly 80, cannot pass and bids follow the step rule'
     bids.map((entry) => [entry.playerId, entry.amount]),
     [['alice', 80], ['boris', 85], ['human', 110], ['alice', 120]],
   );
+});
+
+test('bidding reveals the prikup to every player before the declarer takes it', () => {
+  const game = createFixedGame({
+    hands: TIE_HANDS,
+    prikup: TIE_PRIKUP,
+    dealerIndex: 0,
+  });
+
+  const bidding = game.getState();
+
+  assert.equal(bidding.phase, PHASES.BIDDING);
+  assert.equal(bidding.prikupRevealed, false);
+  assert.equal(bidding.prikupTaken, false);
+
+  for (const player of PLAYERS) {
+    const view = game.getPlayerView(player.id);
+
+    assert.deepEqual(view.prikup, []);
+    assert.equal(view.prikupRevealed, false);
+    assert.equal(view.prikupTaken, false);
+  }
+
+  game.bid('alice', BIDDING.MIN);
+  game.bid('boris', 'pass');
+  const revealed = game.bid('human', 'pass');
+
+  assert.equal(revealed.phase, PHASES.PRIKUP);
+  assert.equal(revealed.prikupRevealed, true);
+  assert.equal(revealed.prikupTaken, false);
+  assert.equal(revealed.prikup.length, 3);
+  assert.equal(getStatePlayer(revealed, 'alice').hand.length, 7);
+  assert.equal(getStatePlayer(revealed, 'human').hand.length, 7);
+
+  for (const player of PLAYERS) {
+    const view = game.getPlayerView(player.id);
+
+    assert.deepEqual(view.prikup, revealed.prikup);
+    assert.equal(view.prikupRevealed, true);
+    assert.equal(view.prikupTaken, false);
+  }
+
+  expectError(() => game.takePrikup('human'), 'NOT_DECLARER');
+
+  const taken = game.takePrikup('alice');
+
+  assert.equal(taken.phase, PHASES.GIVING);
+  assert.equal(taken.prikupTaken, true);
+  assert.deepEqual(taken.prikup, revealed.prikup);
+  assert.equal(getStatePlayer(taken, 'alice').hand.length, 10);
+  assert.equal(getStatePlayer(taken, 'human').hand.length, 7);
+
+  for (const player of PLAYERS) {
+    assert.deepEqual(game.getPlayerView(player.id).prikup, revealed.prikup);
+  }
+
+  expectError(() => game.takePrikup('alice'), 'PRIKUP_ALREADY_TAKEN');
 });
 
 test('passes remove players from bidding and the last active player wins', () => {
@@ -258,13 +330,18 @@ test('passes remove players from bidding and the last active player wins', () =>
   expectError(() => game.bid('boris', 85), 'PLAYER_PASSED');
 
   state = game.bid('human', 'Пас');
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(state.declarerId, 'alice');
   assert.equal(state.contract, 80);
   assert.deepEqual(state.activeBidderIds, ['alice']);
   assert.equal(getStatePlayer(state, 'boris').passed, true);
   assert.equal(getStatePlayer(state, 'human').passed, true);
   assert.equal(getStatePlayer(state, 'alice').passed, false);
+  assert.equal(getStatePlayer(state, 'alice').hand.length, 7);
+  assert.equal(state.prikupRevealed, true);
+
+  state = game.takePrikup('alice');
+  assert.equal(state.phase, PHASES.GIVING);
   assert.equal(getStatePlayer(state, 'alice').hand.length, 10);
 
   const passes = state.log.filter((entry) => entry.type === 'pass');
@@ -285,7 +362,7 @@ test('a player may raise after passing is impossible and passes skip turns', () 
   assert.equal(state.currentBidderId, 'boris');
 
   state = game.bid('boris', 'pass');
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(state.declarerId, 'alice');
   assert.equal(state.contract, 90);
   assert.equal(getStatePlayer(state, 'alice').bid, 90);
@@ -300,17 +377,21 @@ test('jump bids are legal and 120 ends bidding immediately', () => {
   assert.equal(afterJump.currentBid, 110);
   assert.equal(afterJump.currentBidderId, 'human');
 
-  const state = game.bid('human', 120);
+  let state = game.bid('human', 120);
 
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(state.declarerId, 'human');
   assert.equal(state.contract, 120);
   assert.equal(state.currentBid, 120);
   assert.deepEqual(state.activeBidderIds, ['human']);
   assert.equal(getStatePlayer(state, 'human').isDeclarer, true);
-  assert.equal(getStatePlayer(state, 'human').hand.length, 10);
+  assert.equal(getStatePlayer(state, 'human').hand.length, 7);
   assert.equal(getStatePlayer(state, 'alice').passed, false);
   assert.equal(getStatePlayer(state, 'boris').passed, false);
+
+  state = game.takePrikup('human');
+  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(getStatePlayer(state, 'human').hand.length, 10);
 
   expectError(() => game.bid('alice', 120), 'INVALID_PHASE');
 });
@@ -337,9 +418,10 @@ test('every bid from 85 to 120 is accepted with a step of five', () => {
 
   const state = game.getState();
 
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(state.declarerId, 'human');
   assert.equal(state.contract, 120);
+  assert.equal(getStatePlayer(state, 'human').hand.length, 7);
 });
 
 test('the engine emits semantic bidding events and an error event', () => {
@@ -347,6 +429,7 @@ test('the engine emits semantic bidding events and an error event', () => {
   const events = {
     bids: [],
     passes: [],
+    revealed: [],
     prikup: null,
     stateChanges: 0,
     errors: [],
@@ -354,6 +437,7 @@ test('the engine emits semantic bidding events and an error event', () => {
 
   game.on(GAME_EVENTS.BID, (payload) => events.bids.push(payload));
   game.on(GAME_EVENTS.PASS, (payload) => events.passes.push(payload));
+  game.on(GAME_EVENTS.PRIKUP_REVEALED, (payload) => events.revealed.push(payload));
   game.on(GAME_EVENTS.PRIKUP, (payload) => {
     events.prikup = payload;
   });
@@ -374,20 +458,29 @@ test('the engine emits semantic bidding events and an error event', () => {
   assert.equal(events.passes.length, 2);
   assert.deepEqual(events.passes.map((payload) => payload.playerId), ['boris', 'human']);
 
+  assert.equal(events.revealed.length, 1);
+  assert.equal(events.revealed[0].declarerId, 'alice');
+  assert.equal(events.revealed[0].cards.length, 3);
+  assert.equal(events.revealed[0].contract, 80);
+  assert.equal(events.prikup, null);
+
+  assert.equal(events.stateChanges, 3);
+
+  game.takePrikup('alice');
+
   assert.equal(events.prikup.declarerId, 'alice');
   assert.equal(events.prikup.cards.length, 3);
   assert.equal(events.prikup.handSize, 10);
-
-  assert.equal(events.stateChanges, 3);
+  assert.equal(events.stateChanges, 4);
 
   expectError(() => game.bid('alice', 80), 'INVALID_PHASE');
   assert.equal(events.errors.length, 1);
   assert.equal(events.errors[0].code, 'INVALID_PHASE');
-  assert.equal(events.stateChanges, 3);
+  assert.equal(events.stateChanges, 4);
 
   unsubscribe();
   expectError(() => game.bid('alice', 80), 'INVALID_PHASE');
-  assert.equal(events.stateChanges, 3);
+  assert.equal(events.stateChanges, 4);
 });
 
 test('a negative non-opener is passed automatically after the opening bid', () => {
@@ -416,11 +509,12 @@ test('a negative non-opener is passed automatically after the opening bid', () =
 
   state = game.bid('human', 'pass');
 
-  assert.equal(state.phase, PHASES.GIVING);
+  assert.equal(state.phase, PHASES.PRIKUP);
   assert.equal(getStatePlayer(state, 'alice').passed, true);
   assert.deepEqual(state.activeBidderIds, ['boris']);
   assert.equal(state.contract, 80);
   assert.equal(state.declarerId, 'boris');
+  assert.equal(getStatePlayer(state, 'boris').hand.length, 7);
 
   const automaticPassEvent = passEvents.find((payload) => payload.automatic === true);
 
@@ -456,12 +550,14 @@ test('all players in the minus open 80 and finish bidding without a deadlock', (
 
   game.on(GAME_EVENTS.PASS, (payload) => passEvents.push(payload));
 
-  const finished = game.bid(openerId, 80);
+  let finished = game.bid(openerId, 80);
 
-  assert.equal(finished.phase, PHASES.GIVING);
+  assert.equal(finished.phase, PHASES.PRIKUP);
   assert.equal(finished.contract, 80);
   assert.equal(finished.declarerId, openerId);
   assert.deepEqual(finished.activeBidderIds, [openerId]);
+  assert.equal(getStatePlayer(finished, openerId).hand.length, 7);
+  assert.equal(finished.prikupRevealed, true);
 
   for (const player of finished.players) {
     if (player.id === openerId) {
@@ -486,4 +582,10 @@ test('all players in the minus open 80 and finish bidding without a deadlock', (
 
   assert.equal(automaticPasses.length, 2);
   assert.ok(automaticPasses.every((entry) => entry.playerId !== openerId));
+
+  finished = game.takePrikup(openerId);
+
+  assert.equal(finished.phase, PHASES.GIVING);
+  assert.equal(finished.prikupTaken, true);
+  assert.equal(getStatePlayer(finished, openerId).hand.length, 10);
 });

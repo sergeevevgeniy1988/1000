@@ -134,8 +134,14 @@ function runBidding(game, ais) {
 }
 
 function runGifts(game, ais) {
-  const state = game.getState();
+  let state = game.getState();
   const declarerId = state.declarerId;
+
+  if (state.phase === PHASES.PRIKUP) {
+    game.takePrikup(declarerId);
+    state = game.getState();
+  }
+
   const view = game.getPlayerView(declarerId);
   const gifts = ais[declarerId].chooseCardsToGive(view);
 
@@ -161,8 +167,12 @@ function dealToPlaying(game) {
     game.bid(state.currentBidderId, 'pass');
   }
 
-  const state = game.getState();
+  let state = game.getState();
   const declarerId = state.declarerId;
+
+  game.takePrikup(declarerId);
+  state = game.getState();
+
   const hand = getStatePlayer(state, declarerId).hand
     .map((cardId) => getCardById(cardId))
     .sort((left, right) => left.value - right.value || left.strength - right.strength);
@@ -302,8 +312,12 @@ test('AI gives exactly one card to each opponent and keeps its marriages', () =>
 
     runBidding(game, ais);
 
-    const state = game.getState();
+    let state = game.getState();
     const declarerId = state.declarerId;
+
+    game.takePrikup(declarerId);
+    state = game.getState();
+
     const view = game.getPlayerView(declarerId);
     const handIds = new Set(getStatePlayer(view, declarerId).hand);
     const opponents = state.players
@@ -334,6 +348,7 @@ test('AI gives exactly one card to each opponent and keeps its marriages', () =>
   game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   game.bid('human', 'pass');
+  game.takePrikup('alice');
 
   const aliceAI = createAI({ playerId: 'alice', rng: () => 0.5 });
   const view = game.getPlayerView('alice');
@@ -359,6 +374,7 @@ test('AI declares a marriage when leading after the first trick', () => {
   game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   game.bid('human', 'pass');
+  game.takePrikup('alice');
 
   const aliceAI = createAI({ playerId: 'alice', rng: () => 0.5 });
   const gifts = aliceAI.chooseCardsToGive(game.getPlayerView('alice'));
@@ -394,29 +410,49 @@ test('AI declares a marriage when leading after the first trick', () => {
   assert.equal(game.getState().trumpSuit, suit);
 });
 
-test('AI receives player views without foreign hands or hidden prikup', () => {
+test('AI sees no prikup during bidding but sees it after the public reveal', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
     const game = createSeededGame(seed);
     const ais = createAIs(seed);
+    const biddingState = game.getState();
 
-    runBidding(game, ais);
+    for (const player of biddingState.players) {
+      const view = game.getPlayerView(player.id);
 
-    const state = game.getState();
-    const declarerId = state.declarerId;
+      assert.deepEqual(view.prikup, []);
+      assert.equal(view.prikupRevealed, false);
+      assert.equal(view.prikupTaken, false);
+      assert.equal(view.players.filter((entry) => entry.hand.length > 0).length, 1);
+      assert.equal(Object.hasOwn(view, 'deck'), false);
+    }
 
-    for (const player of state.players) {
+    const revealedState = runBidding(game, ais);
+    const declarerId = revealedState.declarerId;
+
+    assert.equal(revealedState.phase, PHASES.PRIKUP);
+    assert.equal(revealedState.prikupRevealed, true);
+    assert.equal(revealedState.prikupTaken, false);
+
+    for (const player of revealedState.players) {
       const view = game.getPlayerView(player.id);
       const visibleHands = view.players.filter((entry) => entry.hand.length > 0);
 
       assert.equal(visibleHands.length, 1);
       assert.equal(visibleHands[0].id, player.id);
       assert.equal(Object.hasOwn(view, 'deck'), false);
+      assert.deepEqual(view.prikup, revealedState.prikup);
+      assert.equal(view.prikup.length, 3);
+      assert.equal(view.prikupRevealed, true);
+      assert.equal(view.prikupTaken, false);
+    }
 
-      if (player.id === declarerId) {
-        assert.equal(view.prikup.length, 3);
-      } else {
-        assert.deepEqual(view.prikup, []);
-      }
+    game.takePrikup(declarerId);
+
+    for (const player of revealedState.players) {
+      const view = game.getPlayerView(player.id);
+
+      assert.deepEqual(view.prikup, revealedState.prikup);
+      assert.equal(view.prikupTaken, true);
     }
   }
 });
@@ -429,6 +465,9 @@ test('AI decisions do not mutate the game state', () => {
 
   let state = game.getState();
   const declarerId = state.declarerId;
+
+  game.takePrikup(declarerId);
+
   let view = game.getPlayerView(declarerId);
   let before = JSON.stringify(game.getState());
 
@@ -502,6 +541,10 @@ test('a full AI game finishes within a reasonable deal limit', () => {
           game.bid(playerId, amount === null ? 'pass' : amount);
           break;
         }
+
+        case PHASES.PRIKUP:
+          game.takePrikup(state.declarerId);
+          break;
 
         case PHASES.GIVING: {
           const playerId = state.declarerId;
