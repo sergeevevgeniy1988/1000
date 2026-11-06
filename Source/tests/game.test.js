@@ -270,13 +270,16 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  const events = { gifts: 0, marriages: 0 };
+  const events = { gifts: 0, marriages: 0, declared: 0 };
 
   game.on(GAME_EVENTS.GIFT, () => {
     events.gifts += 1;
   });
   game.on(GAME_EVENTS.MARRIAGE, () => {
     events.marriages += 1;
+  });
+  game.on(GAME_EVENTS.MARRIAGE_DECLARED, () => {
+    events.declared += 1;
   });
 
   startGivingForAlice(game);
@@ -307,41 +310,96 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.currentPlayerId, 'alice');
   assert.equal(state.trickLeaderId, 'alice');
   assert.equal(state.trumpSuit, null);
+  expectError(() => game.declareMarriage('human', 'H'), 'NOT_YOUR_TURN');
 
   state = game.declareMarriage('alice', 'H');
+  assert.equal(state.trumpSuit, null);
+  assert.equal(state.trumpDeclaredBy, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, []);
+  assert.deepEqual(state.pendingMarriage, { playerId: 'alice', suit: 'H', value: 100 });
+  assert.deepEqual(
+    game.getPlayerView('human').pendingMarriage,
+    state.pendingMarriage,
+  );
+  assert.deepEqual(
+    game.getPlayerView('boris').pendingMarriage,
+    state.pendingMarriage,
+  );
+  assert.deepEqual(state.availableMarriages, [
+    { suit: 'D', value: 80 },
+    { suit: 'H', value: 100 },
+  ]);
+  assert.equal(state.log.filter((entry) => entry.type === 'marriage').length, 0);
+
+  expectError(() => game.declareMarriage('alice', 'D'), 'MARRIAGE_PENDING');
+  expectError(() => game.playCard('alice', 'DA'), 'MARRIAGE_CARD_REQUIRED');
+
+  const afterRejectedCard = game.getState();
+
+  assert.equal(afterRejectedCard.trumpSuit, null);
+  assert.equal(getStatePlayer(afterRejectedCard, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(afterRejectedCard, 'alice').declaredMarriages, []);
+  assert.deepEqual(afterRejectedCard.pendingMarriage, state.pendingMarriage);
+  assert.equal(
+    afterRejectedCard.log.filter((entry) => entry.type === 'marriage').length,
+    0,
+  );
+  expectError(() => game.cancelMarriage('boris'), 'NOT_MARRIAGE_OWNER');
+
+  state = game.cancelMarriage('alice');
+  assert.equal(state.pendingMarriage, null);
+  assert.equal(game.getPlayerView('human').pendingMarriage, null);
+  assert.equal(state.trumpSuit, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, []);
+  expectError(() => game.cancelMarriage('alice'), 'NO_PENDING_MARRIAGE');
+
+  state = game.declareMarriage('alice', 'H');
+  assert.equal(state.pendingMarriage.suit, 'H');
+
+  state = game.playCard('alice', 'HK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'H');
   assert.equal(state.trumpDeclaredBy, 'alice');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 100);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H']);
-  assert.deepEqual(state.availableMarriages, [{ suit: 'D', value: 80 }]);
-  expectError(() => game.declareMarriage('alice', 'D'), 'MARRIAGE_LIMIT');
+  assert.deepEqual(
+    game.getPlayerView('alice').availableMarriages,
+    [{ suit: 'D', value: 80 }],
+  );
 
-  game.playCard('alice', 'HA');
   game.playCard('boris', 'HJ');
   game.playCard('human', 'H9');
 
   state = game.getState();
   assert.equal(state.completedTricks.length, 2);
   assert.equal(state.completedTricks[1].winnerId, 'alice');
-  assert.equal(state.completedTricks[1].points, 13);
+  assert.equal(state.completedTricks[1].points, 6);
   assert.equal(state.currentPlayerId, 'alice');
 
   expectError(() => game.declareMarriage('alice', 'H'), 'MARRIAGE_ALREADY_DECLARED');
 
   state = game.declareMarriage('alice', 'D');
+  assert.equal(state.pendingMarriage.suit, 'D');
+  assert.equal(state.trumpSuit, 'H');
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 100);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H']);
+
+  state = game.playCard('alice', 'DK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'D');
   assert.equal(state.trumpDeclaredBy, 'alice');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 180);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H', 'D']);
 
-  game.playCard('alice', 'DA');
   game.playCard('boris', 'D9');
   game.playCard('human', 'DJ');
 
   state = game.getState();
   assert.equal(state.completedTricks.length, 3);
   assert.equal(state.completedTricks[2].winnerId, 'alice');
-  assert.equal(state.completedTricks[2].points, 13);
+  assert.equal(state.completedTricks[2].points, 6);
 
   playDeal(game);
   state = game.getState();
@@ -372,6 +430,7 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.log.filter((entry) => entry.type === 'scored').length, 1);
   assert.equal(events.gifts, 2);
   assert.equal(events.marriages, 2);
+  assert.equal(events.declared, 3);
 
   const scoresBeforeNextDeal = state.players.map((player) => ({
     id: player.id,
@@ -390,6 +449,7 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.prikupRevealed, false);
   assert.equal(state.prikupTaken, false);
   assert.equal(state.raiseDecided, false);
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, null);
   assert.equal(state.completedTricks.length, 0);
 
@@ -434,6 +494,12 @@ test('a gifted marriage card disappears from the declarer options', () => {
   expectError(() => game.declareMarriage('alice', 'H'), 'MARRIAGE_UNAVAILABLE');
 
   state = game.declareMarriage('alice', 'D');
+  assert.equal(state.pendingMarriage.suit, 'D');
+  assert.equal(state.trumpSuit, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+
+  state = game.playCard('alice', 'DK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'D');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 80);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['D']);

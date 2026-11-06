@@ -102,6 +102,71 @@ function createBiddingView({ currentBid = 0, score = 0 } = {}) {
   };
 }
 
+function createPlayingView({
+  hand = ['HK', 'HQ', 'HA', 'S9', 'SJ', 'SQ', 'H9', 'H10'],
+  pendingMarriage = null,
+} = {}) {
+  return {
+    phase: PHASES.PLAYING,
+    currentPlayerId: 'alice',
+    declarerId: 'alice',
+    contract: BIDDING.MIN,
+    trumpSuit: null,
+    currentTrick: [],
+    completedTricks: [{}],
+    givenCards: [],
+    pendingMarriage,
+    log: [],
+    players: [
+      {
+        id: 'alice',
+        name: 'Алиса',
+        isHuman: false,
+        score: 0,
+        hand,
+        cardCount: hand.length,
+        bid: BIDDING.MIN,
+        passed: false,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: true,
+      },
+      {
+        id: 'boris',
+        name: 'Борис',
+        isHuman: false,
+        score: 0,
+        hand: [],
+        cardCount: 8,
+        bid: null,
+        passed: true,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+      {
+        id: 'human',
+        name: 'Вы',
+        isHuman: true,
+        score: 0,
+        hand: [],
+        cardCount: 8,
+        bid: null,
+        passed: true,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+    ],
+  };
+}
+
 function legalCardsFromView(view) {
   const self = view.players.find((player) => player.id === view.currentPlayerId);
   const leadSuit = view.currentTrick.length === 0
@@ -394,7 +459,7 @@ test('AI declares a marriage when leading after the first trick', () => {
     game.playCard(playerId, legal[0].id);
   }
 
-  const state = game.getState();
+  let state = game.getState();
 
   assert.equal(state.completedTricks.length, 1);
   assert.equal(state.currentPlayerId, 'alice');
@@ -407,7 +472,46 @@ test('AI declares a marriage when leading after the first trick', () => {
   assert.deepEqual(view.prikup, ['CJ', 'S9', 'C10']);
 
   game.declareMarriage('alice', suit);
-  assert.equal(game.getState().trumpSuit, suit);
+
+  state = game.getState();
+
+  assert.equal(state.pendingMarriage.suit, suit);
+  assert.equal(state.trumpSuit, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+  assert.equal(aliceAI.chooseMarriage(game.getPlayerView('alice')), null);
+
+  const pendingView = game.getPlayerView('alice');
+  const card = aliceAI.chooseCard(pendingView, legalCardsFromView(pendingView));
+
+  assert.equal(card.suit, suit);
+  assert.ok(card.rank === 'K' || card.rank === 'Q');
+
+  state = game.playCard('alice', card.id);
+
+  assert.equal(state.pendingMarriage, null);
+  assert.equal(state.trumpSuit, suit);
+  assert.equal(state.trumpDeclaredBy, 'alice');
+  assert.ok(getStatePlayer(state, 'alice').marriagePoints > 0);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, [suit]);
+});
+
+test('AI fallback keeps a pending marriage limited to the king or queen', () => {
+  const pendingMarriage = { playerId: 'alice', suit: 'H', value: 100 };
+  const view = createPlayingView({ pendingMarriage });
+  const ai = createAI({ playerId: 'alice', rng: () => 0.5 });
+  const originalError = console.error;
+
+  console.error = () => {};
+
+  try {
+    const card = chooseCard(view, ['X9']);
+
+    assert.equal(card.suit, 'H');
+    assert.ok(card.rank === 'K' || card.rank === 'Q');
+    assert.equal(ai.chooseMarriage(view), null);
+  } finally {
+    console.error = originalError;
+  }
 });
 
 test('AI sees no prikup during bidding but sees it after the public reveal', () => {

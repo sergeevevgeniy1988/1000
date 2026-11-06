@@ -306,6 +306,46 @@ export function getAvailableMarriages(hand, declaredMarriages = []) {
 }
 
 /**
+ * Returns the king and queen of the given suit when both are in the hand.
+ * An incomplete pair returns an empty array.
+ *
+ * @param {ReadonlyArray<CardLike>} hand
+ * @param {string} suit
+ * @returns {Card[]}
+ * @throws {GameError} When the hand or suit is invalid.
+ */
+export function getMarriageConfirmationCards(hand, suit) {
+  const cards = resolveHand(hand);
+  const normalizedSuit = resolveSuit(suit, 'suit');
+
+  if (normalizedSuit === null) {
+    return [];
+  }
+
+  const king = cards.find((card) => card.suit === normalizedSuit && card.rank === 'K');
+  const queen = cards.find((card) => card.suit === normalizedSuit && card.rank === 'Q');
+
+  return king && queen ? [king, queen] : [];
+}
+
+/**
+ * Checks whether the card is a king or queen of the given suit.
+ *
+ * @param {CardLike} card
+ * @param {string} suit
+ * @returns {boolean}
+ * @throws {GameError} When the card or suit is invalid.
+ */
+export function isMarriageConfirmationCard(card, suit) {
+  const resolvedCard = resolveCard(card);
+  const normalizedSuit = resolveSuit(suit, 'suit');
+
+  return normalizedSuit !== null
+    && resolvedCard.suit === normalizedSuit
+    && (resolvedCard.rank === 'K' || resolvedCard.rank === 'Q');
+}
+
+/**
  * Checks whether a player may declare a marriage right now.
  *
  * @param {ReadonlyArray<CardLike>} hand

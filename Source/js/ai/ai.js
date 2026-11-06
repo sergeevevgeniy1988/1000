@@ -6,6 +6,7 @@ import {
   getLegalCards,
   getTrickPoints,
   getTrickWinner,
+  isMarriageConfirmationCard,
 } from '../core/rules.js';
 import {
   evaluateDiscardRisk,
@@ -281,8 +282,14 @@ function getViewLegalCards(view, actorId, hand) {
   const leadSuit = view.currentTrick.length === 0
     ? null
     : getCardById(view.currentTrick[0].cardId).suit;
+  const legal = getLegalCards(hand, leadSuit, view.trumpSuit ?? null);
+  const pending = view.pendingMarriage;
 
-  return getLegalCards(hand, leadSuit, view.trumpSuit ?? null);
+  if (pending && pending.playerId === actorId) {
+    return legal.filter((card) => isMarriageConfirmationCard(card, pending.suit));
+  }
+
+  return legal;
 }
 
 /**
@@ -712,6 +719,10 @@ export function chooseMarriage(view, options = {}) {
 
   try {
     if (!view || view.phase !== PHASES.PLAYING) {
+      return null;
+    }
+
+    if (view.pendingMarriage) {
       return null;
     }
 

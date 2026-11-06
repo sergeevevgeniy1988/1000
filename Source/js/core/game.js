@@ -15,6 +15,7 @@ import {
   getLegalCards,
   getTrickPoints,
   getTrickWinner,
+  isMarriageConfirmationCard,
 } from './rules.js';
 import { checkGameOver, scoreDeal } from './scoring.js';
 
@@ -57,6 +58,7 @@ export class Game {
   #givenCards = /** @type {{ fromId: string, toId: string, card: Card }[]} */ ([]);
   #trumpSuit = null;
   #trumpDeclaredBy = null;
+  #pendingMarriage = null;
   #currentTrick = /** @type {{ playerId: string, card: Card }[]} */ ([]);
   #trickLeaderId = null;
   #completedTricks = /** @type {{ winnerId: string, cards: { playerId: string, card: Card }[], points: number }[]} */ ([]);
@@ -422,8 +424,9 @@ export class Game {
   }
 
   /**
-   * Declares a marriage before leading a trick. The suit immediately becomes
-   * trump and its bonus is added to the player's deal total.
+   * Declares a marriage before leading a trick. The declaration is pending
+   * until the declarer leads the king or queen of the declared suit; only then
+   * do the trump suit and bonus take effect.
    *
    * @param {string} playerId
    * @param {string} suit Marriage suit id: S, C, D or H.
@@ -437,6 +440,10 @@ export class Game {
 
     if (this.#getActingPlayerId() !== player.id) {
       this.#fail('NOT_YOUR_TURN', `Сейчас очередь не игрока ${player.name}.`);
+    }
+
+    if (this.#pendingMarriage !== null) {
+      this.#fail('MARRIAGE_PENDING', 'Сначала подтвердите или отмените объявленный марьяж.');
     }
 
     if (this.#currentTrick.length > 0) {
@@ -466,22 +473,43 @@ export class Game {
       this.#fail('MARRIAGE_UNAVAILABLE', 'Для этого марьяжа нужны король и дама на руке.');
     }
 
-    player.marriagePoints += marriage.value;
-    player.declaredMarriages.push(suit);
-    this.#trumpSuit = suit;
-    this.#trumpDeclaredBy = player.id;
-    this.#marriagesThisTurn += 1;
+    this.#pendingMarriage = {
+      playerId: player.id,
+      suit,
+      value: marriage.value,
+    };
 
     const payload = deepFreeze({
       playerId: player.id,
       suit,
       value: marriage.value,
-      trumpSuit: suit,
-      marriagePoints: player.marriagePoints,
     });
 
-    this.#addLog('marriage', payload);
-    this.#emitter.emit(GAME_EVENTS.MARRIAGE, payload);
+    this.#emitter.emit(GAME_EVENTS.MARRIAGE_DECLARED, payload);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Cancels a pending marriage before its confirmation card is played.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When there is no pending marriage or it belongs to
+   *   another player.
+   */
+  cancelMarriage(playerId) {
+    const player = this.#getPlayer(playerId);
+
+    if (this.#pendingMarriage === null) {
+      this.#fail('NO_PENDING_MARRIAGE', 'Нет объявленного марьяжа для отмены.');
+    }
+
+    if (this.#pendingMarriage.playerId !== player.id) {
+      this.#fail('NOT_MARRIAGE_OWNER', 'Отменить марьяж может только объявивший его игрок.');
+    }
+
+    this.#pendingMarriage = null;
 
     return this.#emitStateChange();
   }
@@ -514,6 +542,19 @@ export class Game {
       });
     }
 
+    const pendingMarriage = this.#pendingMarriage;
+
+    if (
+      pendingMarriage !== null
+      && !isMarriageConfirmationCard(card, pendingMarriage.suit)
+    ) {
+      this.#fail(
+        'MARRIAGE_CARD_REQUIRED',
+        'После объявления марьяжа нужно выйти королём или дамой этой масти.',
+        { cardId: card.id, suit: pendingMarriage.suit },
+      );
+    }
+
     const leadSuit = this.#currentTrick.length === 0
       ? null
       : this.#currentTrick[0].card.suit;
@@ -526,6 +567,26 @@ export class Game {
         `Карта ${card.id} не является легальной в текущей взятке.`,
         { cardId: card.id, leadSuit, trumpSuit: this.#trumpSuit },
       );
+    }
+
+    if (pendingMarriage !== null) {
+      player.marriagePoints += pendingMarriage.value;
+      player.declaredMarriages.push(pendingMarriage.suit);
+      this.#trumpSuit = pendingMarriage.suit;
+      this.#trumpDeclaredBy = player.id;
+      this.#marriagesThisTurn += 1;
+
+      const marriagePayload = deepFreeze({
+        playerId: player.id,
+        suit: pendingMarriage.suit,
+        value: pendingMarriage.value,
+        trumpSuit: pendingMarriage.suit,
+        marriagePoints: player.marriagePoints,
+      });
+
+      this.#addLog('marriage', marriagePayload);
+      this.#emitter.emit(GAME_EVENTS.MARRIAGE, marriagePayload);
+      this.#pendingMarriage = null;
     }
 
     player.hand.splice(cardIndex, 1);
@@ -699,6 +760,7 @@ export class Game {
     this.#givenCards = [];
     this.#trumpSuit = null;
     this.#trumpDeclaredBy = null;
+    this.#pendingMarriage = null;
     this.#currentTrick = [];
     this.#trickLeaderId = null;
     this.#completedTricks = [];
@@ -886,6 +948,7 @@ export class Game {
     this.#currentTrick = [];
     this.#trickLeaderId = winnerId;
     this.#marriagesThisTurn = 0;
+    this.#pendingMarriage = null;
 
     if (this.#completedTricks.length === DEAL.TRICKS) {
       this.#scoreDeal();
@@ -1030,6 +1093,13 @@ export class Game {
       })),
       trumpSuit: this.#trumpSuit,
       trumpDeclaredBy: this.#trumpDeclaredBy,
+      pendingMarriage: this.#pendingMarriage
+        ? {
+          playerId: this.#pendingMarriage.playerId,
+          suit: this.#pendingMarriage.suit,
+          value: this.#pendingMarriage.value,
+        }
+        : null,
       currentTrick: this.#currentTrick.map((entry) => ({
         playerId: entry.playerId,
         cardId: entry.card.id,

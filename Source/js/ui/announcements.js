@@ -65,6 +65,16 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
         : `Отдар.${contract} ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
     }
     case PHASES.PLAYING: {
+      const pending = state.pendingMarriage;
+
+      if (pending) {
+        const owner = findPlayer(state, pending.playerId);
+
+        return owner?.isHuman
+          ? `Марьяж: ${getSuitNameLower(pending.suit)}. Выйдите королём или дамой.`
+          : `Марьяж: ${getSuitNameLower(pending.suit)}. ${owner?.name ?? 'Игрок'} выходит королём или дамой.`;
+      }
+
       const trickNumber = Math.min(state.completedTricks.length + 1, DEAL.TRICKS);
       const turn = actor?.isHuman
         ? 'Ваш ход.'

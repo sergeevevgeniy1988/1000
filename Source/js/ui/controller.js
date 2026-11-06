@@ -2,7 +2,7 @@ import { BIDDING, GAME_EVENTS, PHASES, TARGET_SCORE } from '../core/constants.js
 import { getCardById } from '../core/deck.js';
 import { Game } from '../core/game.js';
 import { mulberry32 } from '../core/rng.js';
-import { getLegalCards } from '../core/rules.js';
+import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { clearElement, createElement } from './dom.js';
 import { getPhaseName, nameGenitive } from './format.js';
@@ -13,7 +13,11 @@ import { renderHand } from './hand.js';
 import { renderLog, resetLog } from './log.js';
 import { renderTable } from './table.js';
 import { applySpeechBubbles, createBiddingControls } from './bidding.js';
-import { createMarriageButton, createMarriageMenu } from './marriage.js';
+import {
+  createMarriageButton,
+  createMarriageMenu,
+  createPendingMarriageStatus,
+} from './marriage.js';
 import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
 import {
   closeModal,
@@ -589,6 +593,24 @@ export class Controller {
       }
       case PHASES.PLAYING: {
         const group = createElement('div', { className: 'action-bar__group' });
+        const pending = state.pendingMarriage;
+
+        if (pending) {
+          const owner = state.players.find((player) => player.id === pending.playerId);
+
+          group.append(createPendingMarriageStatus({
+            suit: pending.suit,
+            playerName: owner?.name ?? 'Игрок',
+            isHuman: pending.playerId === this.#humanId,
+            onCancel: pending.playerId === this.#humanId
+              ? () => this.#humanCancelMarriage()
+              : null,
+          }));
+
+          bar.append(group);
+          break;
+        }
+
         const actor = state.players.find((player) => player.id === state.currentPlayerId);
         const statusText = actor?.isHuman
           ? 'Ваш ход — выберите карту.'
@@ -662,6 +684,13 @@ export class Controller {
       return null;
     }
 
+    const pending = state.pendingMarriage;
+
+    if (pending && pending.playerId === this.#humanId) {
+      return getMarriageConfirmationCards(human.hand, pending.suit)
+        .map((card) => card.id);
+    }
+
     let leadSuit = null;
 
     if (state.currentTrick.length > 0) {
@@ -682,6 +711,10 @@ export class Controller {
     }
 
     if (state.currentPlayerId !== this.#humanId) {
+      return [];
+    }
+
+    if (state.pendingMarriage) {
       return [];
     }
 
@@ -761,6 +794,20 @@ export class Controller {
 
     try {
       this.#game.declareMarriage(this.#humanId, suit);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
+    }
+  }
+
+  /**
+   * Cancels the human declarer's pending marriage before the confirmation card.
+   *
+   * @returns {void}
+   */
+  #humanCancelMarriage() {
+    try {
+      this.#game.cancelMarriage(this.#humanId);
     } catch (error) {
       this.#reportUnexpected(error);
       this.#render(this.#game.getState());
@@ -1083,7 +1130,11 @@ export class Controller {
         case PHASES.PLAYING: {
           const view = this.#game.getPlayerView(actor.id);
 
-          if (state.currentTrick.length === 0 && state.completedTricks.length >= 1) {
+          if (
+            !state.pendingMarriage
+            && state.currentTrick.length === 0
+            && state.completedTricks.length >= 1
+          ) {
             let suit = null;
 
             try {
@@ -1146,8 +1197,19 @@ export class Controller {
     const leadSuit = state.currentTrick.length > 0
       ? getCardById(state.currentTrick[0].cardId).suit
       : null;
+    const legal = getLegalCards(player.hand, leadSuit, state.trumpSuit);
+    const pending = state.pendingMarriage;
 
-    return getLegalCards(player.hand, leadSuit, state.trumpSuit);
+    if (pending && pending.playerId === playerId) {
+      const confirmationIds = new Set(
+        getMarriageConfirmationCards(player.hand, pending.suit)
+          .map((card) => card.id),
+      );
+
+      return legal.filter((card) => confirmationIds.has(card.id));
+    }
+
+    return legal;
   }
 
   /**

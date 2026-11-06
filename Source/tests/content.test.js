@@ -108,6 +108,21 @@ test('rules describe one contract raise after the prikup', () => {
   assert.doesNotMatch(notImplementedText, /повышение ставки после прикупа/i);
 });
 
+test('marriage rules require confirmation by king or queen', () => {
+  const section = RULES_SECTIONS.find((entry) => entry.id === 'marriages');
+  const text = section.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+
+  assert.match(text, /выйти королём или дамой/);
+  assert.match(text, /только после этого хода/);
+  assert.match(text, /можно отменить/);
+  assert.match(text, /после подтверждения/i);
+  assert.doesNotMatch(text, /немедленно становится козырем/i);
+  assert.doesNotMatch(text, /Не требуется ходить/i);
+  assert.doesNotMatch(text, /сразу начисляется/i);
+});
+
 test('visible rules text is fully Russian', () => {
   const visibleText = RULES_SECTIONS.flatMap((section) => [
     section.title,
