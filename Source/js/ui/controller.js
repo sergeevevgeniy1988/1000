@@ -2,10 +2,10 @@ import { BIDDING, GAME_EVENTS, PHASES, TARGET_SCORE } from '../core/constants.js
 import { getCardById } from '../core/deck.js';
 import { Game } from '../core/game.js';
 import { mulberry32 } from '../core/rng.js';
-import { getLegalCards } from '../core/rules.js';
+import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { clearElement, createElement } from './dom.js';
-import { formatCards, getPhaseName, nameGenitive } from './format.js';
+import { getPhaseName, nameGenitive } from './format.js';
 import { createAnnouncer, getPhaseAnnouncement } from './announcements.js';
 import { getActionErrorMessage } from './errors.js';
 import { captureFocus, focusFirstLegalCard, restoreFocus } from './focus.js';
@@ -13,8 +13,12 @@ import { renderHand } from './hand.js';
 import { renderLog, resetLog } from './log.js';
 import { renderTable } from './table.js';
 import { applySpeechBubbles, createBiddingControls } from './bidding.js';
-import { createMarriageButton, createMarriageMenu } from './marriage.js';
-import { openPrikupModal } from './prikup.js';
+import {
+  createMarriageButton,
+  createMarriageMenu,
+  createPendingMarriageStatus,
+} from './marriage.js';
+import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
 import {
   closeModal,
   getOpenModalKind,
@@ -338,8 +342,7 @@ export class Controller {
   }
 
   /**
-   * Announces an AI prikup with a short visible notice. The prikup contents
-   * themselves are never rendered.
+   * Announces that an AI declarer took the already revealed prikup.
    *
    * @param {{ declarerId: string, cards: string[], handSize: number }} payload
    * @returns {void}
@@ -348,7 +351,7 @@ export class Controller {
     const declarer = this.#players.find((player) => player.id === payload.declarerId);
 
     if (declarer && !declarer.isHuman) {
-      showToast(`${declarer.name} берёт прикуп — ${formatCards(payload.cards.length)}.`, 'info');
+      showToast(`${declarer.name} забирает прикуп.`, 'info');
     }
   }
 
@@ -544,21 +547,70 @@ export class Controller {
         }));
         break;
       }
-      case PHASES.GIVING: {
+      case PHASES.PRIKUP: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
 
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
           createElement('span', {
             className: 'action-bar__status',
             text: declarer?.isHuman
-              ? 'Выберите по одной карте для Алисы и Бориса в окне прикупа.'
-              : `${declarer?.name ?? 'Играющий'} забирает прикуп и отдаёт карты…`,
+              ? 'Прикуп раскрыт — заберите три карты.'
+              : `Прикуп раскрыт. ${declarer?.name ?? 'Играющий'} забирает карты.`,
+          }),
+        ]));
+        break;
+      }
+      case PHASES.GIVING: {
+        const declarer = state.players.find((player) => player.id === state.declarerId);
+        const human = state.players.find((player) => player.id === this.#humanId);
+        let statusText;
+
+        if (!state.raiseDecided) {
+          if (declarer?.isHuman) {
+            if (human && human.score < 0) {
+              statusText = 'Повышение недоступно: отрицательный счёт.';
+            } else if (state.contract >= BIDDING.MAX) {
+              statusText = 'Заказ максимальный: повышать некуда.';
+            } else {
+              statusText = 'Решите, повышать ли заказ, в окне повышения.';
+            }
+          } else {
+            statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
+          }
+        } else {
+          statusText = declarer?.isHuman
+            ? `Заказ ${state.contract}. Выберите по одной карте для Алисы и Бориса в окне отдара.`
+            : `Заказ ${state.contract}. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`;
+        }
+
+        bar.append(createElement('div', { className: 'action-bar__group' }, ...[
+          createElement('span', {
+            className: 'action-bar__status',
+            text: statusText,
           }),
         ]));
         break;
       }
       case PHASES.PLAYING: {
         const group = createElement('div', { className: 'action-bar__group' });
+        const pending = state.pendingMarriage;
+
+        if (pending) {
+          const owner = state.players.find((player) => player.id === pending.playerId);
+
+          group.append(createPendingMarriageStatus({
+            suit: pending.suit,
+            playerName: owner?.name ?? 'Игрок',
+            isHuman: pending.playerId === this.#humanId,
+            onCancel: pending.playerId === this.#humanId
+              ? () => this.#humanCancelMarriage()
+              : null,
+          }));
+
+          bar.append(group);
+          break;
+        }
+
         const actor = state.players.find((player) => player.id === state.currentPlayerId);
         const statusText = actor?.isHuman
           ? 'Ваш ход — выберите карту.'
@@ -632,6 +684,13 @@ export class Controller {
       return null;
     }
 
+    const pending = state.pendingMarriage;
+
+    if (pending && pending.playerId === this.#humanId) {
+      return getMarriageConfirmationCards(human.hand, pending.suit)
+        .map((card) => card.id);
+    }
+
     let leadSuit = null;
 
     if (state.currentTrick.length > 0) {
@@ -652,6 +711,10 @@ export class Controller {
     }
 
     if (state.currentPlayerId !== this.#humanId) {
+      return [];
+    }
+
+    if (state.pendingMarriage) {
       return [];
     }
 
@@ -738,6 +801,20 @@ export class Controller {
   }
 
   /**
+   * Cancels the human declarer's pending marriage before the confirmation card.
+   *
+   * @returns {void}
+   */
+  #humanCancelMarriage() {
+    try {
+      this.#game.cancelMarriage(this.#humanId);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
+    }
+  }
+
+  /**
    * Applies both human gifts. The engine reacts to each one, so the modal is
    * kept open until the second gift moves the game into PLAYING.
    *
@@ -753,6 +830,40 @@ export class Controller {
       this.#reportUnexpected(error);
       this.#render(this.#game.getState());
     }
+  }
+
+  /**
+   * Applies the human declarer's single contract-raise decision.
+   *
+   * @param {number | null} amountOrNull New contract or null to decline.
+   * @returns {void}
+   */
+  #resolveHumanRaise(amountOrNull) {
+    if (this.#paused) {
+      return;
+    }
+
+    try {
+      this.#game.raiseContract(this.#humanId, amountOrNull);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
+    }
+  }
+
+  /**
+   * @param {number} amount
+   * @returns {void}
+   */
+  #humanRaise(amount) {
+    this.#resolveHumanRaise(amount);
+  }
+
+  /**
+   * @returns {void}
+   */
+  #humanDeclineRaise() {
+    this.#resolveHumanRaise(null);
   }
 
   /**
@@ -780,7 +891,8 @@ export class Controller {
     }
 
     const kind = getOpenModalKind();
-    const mandatoryModal = (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
+    const mandatoryModal = state.phase === PHASES.PRIKUP
+      || (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
       || state.phase === PHASES.DEAL_END
       || state.phase === PHASES.GAME_OVER;
 
@@ -788,10 +900,36 @@ export class Controller {
       this.#elements.logDrawer?.close({ restoreFocus: false });
     }
 
+    if (state.phase === PHASES.PRIKUP) {
+      if (kind !== 'prikup-reveal') {
+        closeModal({ silent: true });
+        openPrikupRevealModal({
+          state,
+          onTakePrikup: () => this.#takePrikup(state.declarerId),
+        });
+      }
+
+      return;
+    }
+
     if (state.phase === PHASES.GIVING && state.declarerId === this.#humanId) {
+      if (!state.raiseDecided && state.givenCards.length === 0) {
+        if (kind !== 'raise') {
+          closeModal({ silent: true });
+          openRaiseModal({
+            state,
+            humanId: this.#humanId,
+            onRaise: (amount) => this.#humanRaise(amount),
+            onDecline: () => this.#humanDeclineRaise(),
+          });
+        }
+
+        return;
+      }
+
       if (kind !== 'prikup') {
         closeModal({ silent: true });
-        openPrikupModal({
+        openGiftModal({
           state,
           humanId: this.#humanId,
           onConfirm: (gifts) => this.#applyHumanGifts(gifts),
@@ -826,8 +964,34 @@ export class Controller {
       return;
     }
 
-    if (kind === 'prikup' || kind === 'results' || kind === 'gameover') {
+    if (
+      kind === 'prikup'
+      || kind === 'prikup-reveal'
+      || kind === 'raise'
+      || kind === 'results'
+      || kind === 'gameover'
+    ) {
       closeModal({ silent: true });
+    }
+  }
+
+  /**
+   * Takes the revealed prikup for the declarer. The controller drives this for
+   * both human and AI declarers because the reveal modal is mandatory.
+   *
+   * @param {string | null} declarerId
+   * @returns {void}
+   */
+  #takePrikup(declarerId) {
+    if (!this.#game || typeof declarerId !== 'string') {
+      return;
+    }
+
+    try {
+      this.#game.takePrikup(declarerId);
+    } catch (error) {
+      this.#reportUnexpected(error);
+      this.#render(this.#game.getState());
     }
   }
 
@@ -852,6 +1016,8 @@ export class Controller {
     const actor = state.currentPlayerId
       ? state.players.find((player) => player.id === state.currentPlayerId)
       : null;
+    // PRIKUP is intentionally excluded: the mandatory reveal modal lets the
+    // controller take the prikup for both human and AI declarers.
     const playablePhase = state.phase === PHASES.BIDDING
       || state.phase === PHASES.GIVING
       || state.phase === PHASES.PLAYING;
@@ -894,6 +1060,12 @@ export class Controller {
 
       switch (state.phase) {
         case PHASES.BIDDING: {
+          if (actor.score < 0 && state.currentBid > 0) {
+            // Negative-score players are passed by the engine before their turn.
+            // Never let the UI send a bid or a voluntary pass for them.
+            break;
+          }
+
           const view = this.#game.getPlayerView(actor.id);
           let amount = null;
 
@@ -910,8 +1082,31 @@ export class Controller {
           this.#game.bid(actor.id, amount);
           break;
         }
+        case PHASES.PRIKUP:
+          // The controller takes the revealed prikup from the mandatory modal.
+          break;
         case PHASES.GIVING: {
           const view = this.#game.getPlayerView(actor.id);
+
+          if (!state.raiseDecided && state.givenCards.length === 0) {
+            let amount = null;
+
+            if (actor.score >= 0) {
+              try {
+                amount = ai.chooseContractRaise(view);
+              } catch (error) {
+                console.error('[1000] AI не смог выбрать повышение заказа:', error);
+              }
+            }
+
+            if (!isLegalRaise(state, amount) || actor.score < 0) {
+              amount = null;
+            }
+
+            this.#game.raiseContract(actor.id, amount);
+            break;
+          }
+
           let gift = null;
 
           try {
@@ -935,7 +1130,11 @@ export class Controller {
         case PHASES.PLAYING: {
           const view = this.#game.getPlayerView(actor.id);
 
-          if (state.currentTrick.length === 0 && state.completedTricks.length >= 1) {
+          if (
+            !state.pendingMarriage
+            && state.currentTrick.length === 0
+            && state.completedTricks.length >= 1
+          ) {
             let suit = null;
 
             try {
@@ -998,8 +1197,19 @@ export class Controller {
     const leadSuit = state.currentTrick.length > 0
       ? getCardById(state.currentTrick[0].cardId).suit
       : null;
+    const legal = getLegalCards(player.hand, leadSuit, state.trumpSuit);
+    const pending = state.pendingMarriage;
 
-    return getLegalCards(player.hand, leadSuit, state.trumpSuit);
+    if (pending && pending.playerId === playerId) {
+      const confirmationIds = new Set(
+        getMarriageConfirmationCards(player.hand, pending.suit)
+          .map((card) => card.id),
+      );
+
+      return legal.filter((card) => confirmationIds.has(card.id));
+    }
+
+    return legal;
   }
 
   /**
@@ -1080,6 +1290,23 @@ function isLegalBid(state, amount) {
   }
 
   return amount >= state.currentBid + BIDDING.STEP;
+}
+
+/**
+ * @param {object} state
+ * @param {number | null} amount
+ * @returns {boolean}
+ */
+function isLegalRaise(state, amount) {
+  if (amount === null) {
+    return true;
+  }
+
+  return typeof amount === 'number'
+    && Number.isInteger(amount)
+    && amount % BIDDING.STEP === 0
+    && amount > state.contract
+    && amount <= BIDDING.MAX;
 }
 
 /**

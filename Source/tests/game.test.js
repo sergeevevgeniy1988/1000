@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { GAME_EVENTS, PHASES } from '../js/core/constants.js';
+import { BIDDING, GAME_EVENTS, PHASES } from '../js/core/constants.js';
 import { createDeck } from '../js/core/deck.js';
 import { GameError } from '../js/core/errors.js';
 import { Game } from '../js/core/game.js';
@@ -43,9 +43,14 @@ function expectError(action, code) {
 }
 
 function bidForAlice(game) {
-  game.bid('alice', 100);
+  game.bid('alice', BIDDING.MIN);
   game.bid('boris', 'pass');
   return game.bid('human', 'pass');
+}
+
+function startGivingForAlice(game) {
+  bidForAlice(game);
+  return game.takePrikup('alice');
 }
 
 function playDeal(game) {
@@ -148,6 +153,8 @@ test('state snapshots are frozen copies and player views hide private data', () 
 
   assert.equal(humanView.phase, PHASES.BIDDING);
   assert.equal(humanView.prikup.length, 0);
+  assert.equal(humanView.prikupRevealed, false);
+  assert.equal(humanView.prikupTaken, false);
   assert.deepEqual(getStatePlayer(humanView, 'human').hand, getStatePlayer(state, 'human').hand);
   assert.deepEqual(getStatePlayer(humanView, 'alice').hand, []);
   assert.deepEqual(getStatePlayer(humanView, 'boris').hand, []);
@@ -165,32 +172,62 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  const state = bidForAlice(game);
+  const revealed = bidForAlice(game);
+
+  assert.equal(revealed.phase, PHASES.PRIKUP);
+  assert.equal(revealed.declarerId, 'alice');
+  assert.equal(revealed.currentPlayerId, 'alice');
+  assert.equal(revealed.prikupRevealed, true);
+  assert.equal(revealed.prikupTaken, false);
+  assert.equal(revealed.raiseDecided, false);
+  assert.equal(revealed.prikup.length, 3);
+  assert.equal(getStatePlayer(revealed, 'alice').hand.length, 7);
+  assert.equal(getStatePlayer(revealed, 'alice').isDeclarer, true);
+  assert.equal(getStatePlayer(revealed, 'human').hand.length, 7);
+
+  for (const player of PLAYERS) {
+    const view = game.getPlayerView(player.id);
+
+    assert.deepEqual(view.prikup, revealed.prikup);
+    assert.equal(view.prikupRevealed, true);
+    assert.equal(view.prikupTaken, false);
+  }
+
+  expectError(() => game.takePrikup('human'), 'NOT_DECLARER');
+  expectError(() => game.giveCard('boris', 'S9'), 'INVALID_PHASE');
+  expectError(() => game.playCard('alice', 'SA'), 'INVALID_PHASE');
+
+  const state = game.takePrikup('alice');
 
   assert.equal(state.phase, PHASES.GIVING);
-  assert.equal(state.declarerId, 'alice');
+  assert.equal(state.currentPlayerId, 'alice');
+  assert.equal(state.prikupRevealed, true);
   assert.equal(state.prikupTaken, true);
+  assert.equal(state.raiseDecided, false);
   assert.equal(state.prikup.length, 3);
   assert.equal(getStatePlayer(state, 'alice').hand.length, 10);
-  assert.equal(getStatePlayer(state, 'alice').isDeclarer, true);
   assert.equal(getStatePlayer(state, 'human').hand.length, 7);
 
   const humanView = game.getPlayerView('human');
   const aliceView = game.getPlayerView('alice');
 
-  assert.deepEqual(humanView.prikup, []);
+  assert.deepEqual(humanView.prikup, state.prikup);
   assert.deepEqual(aliceView.prikup, state.prikup);
   assert.deepEqual(getStatePlayer(humanView, 'alice').hand, []);
   assert.equal(getStatePlayer(humanView, 'alice').cardCount, 10);
   assert.equal(getStatePlayer(aliceView, 'alice').hand.length, 10);
   assert.deepEqual(getStatePlayer(aliceView, 'human').hand, []);
 
+  const revealLog = state.log.find((entry) => entry.type === 'prikuprevealed');
+  assert.ok(revealLog);
+  assert.equal(revealLog.cards.length, 3);
+
   const prikupLog = state.log.find((entry) => entry.type === 'prikup');
   assert.ok(prikupLog);
   assert.equal(prikupLog.count, 3);
   assert.equal(Object.hasOwn(prikupLog, 'cards'), false);
 
-  expectError(() => game.playCard('alice', 'SA'), 'INVALID_PHASE');
+  expectError(() => game.takePrikup('alice'), 'PRIKUP_ALREADY_TAKEN');
   expectError(() => game.giveCard('alice', 'S9'), 'INVALID_TARGET');
   expectError(() => game.giveCard('nobody', 'S9'), 'UNKNOWN_PLAYER');
   expectError(() => game.giveCard('boris', 'SJ'), 'CARD_NOT_IN_HAND');
@@ -198,6 +235,7 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   let nextState = game.giveCard('boris', 'S9');
 
   assert.equal(nextState.phase, PHASES.GIVING);
+  assert.equal(nextState.raiseDecided, true);
   assert.equal(getStatePlayer(nextState, 'alice').hand.length, 9);
   assert.equal(getStatePlayer(nextState, 'boris').hand.length, 8);
   assert.deepEqual(nextState.givenCards, [
@@ -232,7 +270,7 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  const events = { gifts: 0, marriages: 0 };
+  const events = { gifts: 0, marriages: 0, declared: 0 };
 
   game.on(GAME_EVENTS.GIFT, () => {
     events.gifts += 1;
@@ -240,8 +278,11 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   game.on(GAME_EVENTS.MARRIAGE, () => {
     events.marriages += 1;
   });
+  game.on(GAME_EVENTS.MARRIAGE_DECLARED, () => {
+    events.declared += 1;
+  });
 
-  bidForAlice(game);
+  startGivingForAlice(game);
   game.giveCard('boris', 'S9');
   game.giveCard('human', 'CJ');
 
@@ -269,41 +310,96 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.currentPlayerId, 'alice');
   assert.equal(state.trickLeaderId, 'alice');
   assert.equal(state.trumpSuit, null);
+  expectError(() => game.declareMarriage('human', 'H'), 'NOT_YOUR_TURN');
 
   state = game.declareMarriage('alice', 'H');
+  assert.equal(state.trumpSuit, null);
+  assert.equal(state.trumpDeclaredBy, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, []);
+  assert.deepEqual(state.pendingMarriage, { playerId: 'alice', suit: 'H', value: 100 });
+  assert.deepEqual(
+    game.getPlayerView('human').pendingMarriage,
+    state.pendingMarriage,
+  );
+  assert.deepEqual(
+    game.getPlayerView('boris').pendingMarriage,
+    state.pendingMarriage,
+  );
+  assert.deepEqual(state.availableMarriages, [
+    { suit: 'D', value: 80 },
+    { suit: 'H', value: 100 },
+  ]);
+  assert.equal(state.log.filter((entry) => entry.type === 'marriage').length, 0);
+
+  expectError(() => game.declareMarriage('alice', 'D'), 'MARRIAGE_PENDING');
+  expectError(() => game.playCard('alice', 'DA'), 'MARRIAGE_CARD_REQUIRED');
+
+  const afterRejectedCard = game.getState();
+
+  assert.equal(afterRejectedCard.trumpSuit, null);
+  assert.equal(getStatePlayer(afterRejectedCard, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(afterRejectedCard, 'alice').declaredMarriages, []);
+  assert.deepEqual(afterRejectedCard.pendingMarriage, state.pendingMarriage);
+  assert.equal(
+    afterRejectedCard.log.filter((entry) => entry.type === 'marriage').length,
+    0,
+  );
+  expectError(() => game.cancelMarriage('boris'), 'NOT_MARRIAGE_OWNER');
+
+  state = game.cancelMarriage('alice');
+  assert.equal(state.pendingMarriage, null);
+  assert.equal(game.getPlayerView('human').pendingMarriage, null);
+  assert.equal(state.trumpSuit, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, []);
+  expectError(() => game.cancelMarriage('alice'), 'NO_PENDING_MARRIAGE');
+
+  state = game.declareMarriage('alice', 'H');
+  assert.equal(state.pendingMarriage.suit, 'H');
+
+  state = game.playCard('alice', 'HK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'H');
   assert.equal(state.trumpDeclaredBy, 'alice');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 100);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H']);
-  assert.deepEqual(state.availableMarriages, [{ suit: 'D', value: 80 }]);
-  expectError(() => game.declareMarriage('alice', 'D'), 'MARRIAGE_LIMIT');
+  assert.deepEqual(
+    game.getPlayerView('alice').availableMarriages,
+    [{ suit: 'D', value: 80 }],
+  );
 
-  game.playCard('alice', 'HA');
   game.playCard('boris', 'HJ');
   game.playCard('human', 'H9');
 
   state = game.getState();
   assert.equal(state.completedTricks.length, 2);
   assert.equal(state.completedTricks[1].winnerId, 'alice');
-  assert.equal(state.completedTricks[1].points, 13);
+  assert.equal(state.completedTricks[1].points, 6);
   assert.equal(state.currentPlayerId, 'alice');
 
   expectError(() => game.declareMarriage('alice', 'H'), 'MARRIAGE_ALREADY_DECLARED');
 
   state = game.declareMarriage('alice', 'D');
+  assert.equal(state.pendingMarriage.suit, 'D');
+  assert.equal(state.trumpSuit, 'H');
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 100);
+  assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H']);
+
+  state = game.playCard('alice', 'DK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'D');
   assert.equal(state.trumpDeclaredBy, 'alice');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 180);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['H', 'D']);
 
-  game.playCard('alice', 'DA');
   game.playCard('boris', 'D9');
   game.playCard('human', 'DJ');
 
   state = game.getState();
   assert.equal(state.completedTricks.length, 3);
   assert.equal(state.completedTricks[2].winnerId, 'alice');
-  assert.equal(state.completedTricks[2].points, 13);
+  assert.equal(state.completedTricks[2].points, 6);
 
   playDeal(game);
   state = game.getState();
@@ -315,10 +411,10 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 180);
   assert.equal(state.lastDealResult.dealNumber, 1);
   assert.equal(state.lastDealResult.declarerId, 'alice');
-  assert.equal(state.lastDealResult.contract, 100);
+  assert.equal(state.lastDealResult.contract, BIDDING.MIN);
   assert.equal(state.lastDealResult.contractMet, true);
-  assert.equal(resultFor(state.lastDealResult, 'alice').delta, 100);
-  assert.equal(getStatePlayer(state, 'alice').score, 100);
+  assert.equal(resultFor(state.lastDealResult, 'alice').delta, BIDDING.MIN);
+  assert.equal(getStatePlayer(state, 'alice').score, BIDDING.MIN);
 
   for (const player of state.players) {
     const result = resultFor(state.lastDealResult, player.id);
@@ -334,6 +430,7 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.log.filter((entry) => entry.type === 'scored').length, 1);
   assert.equal(events.gifts, 2);
   assert.equal(events.marriages, 2);
+  assert.equal(events.declared, 3);
 
   const scoresBeforeNextDeal = state.players.map((player) => ({
     id: player.id,
@@ -349,6 +446,10 @@ test('marriages switch trump, add bonuses and the deal is scored through nextDea
   assert.equal(state.firstBidderId, 'boris');
   assert.equal(state.currentBidderId, 'boris');
   assert.equal(state.lastDealResult, null);
+  assert.equal(state.prikupRevealed, false);
+  assert.equal(state.prikupTaken, false);
+  assert.equal(state.raiseDecided, false);
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, null);
   assert.equal(state.completedTricks.length, 0);
 
@@ -370,7 +471,7 @@ test('a gifted marriage card disappears from the declarer options', () => {
     prikup: MARRIAGE_PRIKUP,
     dealerIndex: 0,
   });
-  bidForAlice(game);
+  startGivingForAlice(game);
   game.giveCard('boris', 'HQ');
   game.giveCard('human', 'CJ');
 
@@ -393,6 +494,12 @@ test('a gifted marriage card disappears from the declarer options', () => {
   expectError(() => game.declareMarriage('alice', 'H'), 'MARRIAGE_UNAVAILABLE');
 
   state = game.declareMarriage('alice', 'D');
+  assert.equal(state.pendingMarriage.suit, 'D');
+  assert.equal(state.trumpSuit, null);
+  assert.equal(getStatePlayer(state, 'alice').marriagePoints, 0);
+
+  state = game.playCard('alice', 'DK');
+  assert.equal(state.pendingMarriage, null);
   assert.equal(state.trumpSuit, 'D');
   assert.equal(getStatePlayer(state, 'alice').marriagePoints, 80);
   assert.deepEqual(getStatePlayer(state, 'alice').declaredMarriages, ['D']);
@@ -404,7 +511,7 @@ test('a player who takes no tricks receives a bolt and the engine keeps scores',
     prikup: DOMINATING_PRIKUP,
     dealerIndex: 0,
   });
-  bidForAlice(game);
+  startGivingForAlice(game);
   game.giveCard('boris', 'S9');
   game.giveCard('human', 'C9');
   playDeal(game);
@@ -416,7 +523,7 @@ test('a player who takes no tricks receives a bolt and the engine keeps scores',
   assert.equal(getStatePlayer(state, 'alice').trickPoints, 120);
   assert.equal(getStatePlayer(state, 'boris').tricksWon, 0);
   assert.equal(getStatePlayer(state, 'human').tricksWon, 0);
-  assert.equal(getStatePlayer(state, 'alice').score, 100);
+  assert.equal(getStatePlayer(state, 'alice').score, BIDDING.MIN);
   assert.equal(getStatePlayer(state, 'boris').score, 0);
   assert.equal(getStatePlayer(state, 'human').score, 0);
   assert.equal(getStatePlayer(state, 'boris').bolts, 1);
@@ -434,7 +541,7 @@ test('a tie at the target keeps the game going for another deal', () => {
     dealerIndex: 0,
     targetScore: 30,
   });
-  bidForAlice(game);
+  startGivingForAlice(game);
   game.giveCard('boris', 'SK');
   game.giveCard('human', 'S9');
 
@@ -462,7 +569,7 @@ test('a tie at the target keeps the game going for another deal', () => {
   assert.equal(getStatePlayer(state, 'alice').tricksWon, 4);
   assert.equal(getStatePlayer(state, 'boris').tricksWon, 2);
   assert.equal(getStatePlayer(state, 'human').tricksWon, 2);
-  assert.equal(getStatePlayer(state, 'alice').score, -100);
+  assert.equal(getStatePlayer(state, 'alice').score, -BIDDING.MIN);
   assert.equal(getStatePlayer(state, 'boris').score, 30);
   assert.equal(getStatePlayer(state, 'human').score, 30);
   assert.equal(state.lastDealResult.contractMet, false);
@@ -477,7 +584,7 @@ test('a tie at the target keeps the game going for another deal', () => {
   assert.equal(nextState.phase, PHASES.BIDDING);
   assert.equal(nextState.dealNumber, 2);
   assert.equal(nextState.dealerIndex, 1);
-  assert.equal(getStatePlayer(nextState, 'alice').score, -100);
+  assert.equal(getStatePlayer(nextState, 'alice').score, -BIDDING.MIN);
   assert.equal(getStatePlayer(nextState, 'boris').score, 30);
   assert.equal(getStatePlayer(nextState, 'human').score, 30);
 });
@@ -487,7 +594,7 @@ test('reaching the target with an outright lead finishes the game', () => {
     hands: DOMINATING_HANDS,
     prikup: DOMINATING_PRIKUP,
     dealerIndex: 0,
-    targetScore: 100,
+    targetScore: BIDDING.MIN,
   });
   const events = {
     cardPlayed: 0,
@@ -509,7 +616,7 @@ test('reaching the target with an outright lead finishes the game', () => {
     events.gameOver += 1;
   });
 
-  bidForAlice(game);
+  startGivingForAlice(game);
   game.giveCard('boris', 'S9');
   game.giveCard('human', 'C9');
   playDeal(game);
@@ -519,8 +626,8 @@ test('reaching the target with an outright lead finishes the game', () => {
   assert.equal(state.phase, PHASES.GAME_OVER);
   assert.equal(state.winnerId, 'alice');
   assert.equal(state.lastDealResult.gameResult.isOver, true);
-  assert.equal(state.lastDealResult.gameResult.topScore, 100);
-  assert.equal(state.lastDealResult.gameResult.targetScore, 100);
+  assert.equal(state.lastDealResult.gameResult.topScore, BIDDING.MIN);
+  assert.equal(state.lastDealResult.gameResult.targetScore, BIDDING.MIN);
   assert.deepEqual(state.lastDealResult.gameResult.leaderIds, ['alice']);
 
   assert.equal(events.cardPlayed, 24);
@@ -530,7 +637,7 @@ test('reaching the target with an outright lead finishes the game', () => {
   assert.equal(state.log.filter((entry) => entry.type === 'gameover').length, 1);
 
   expectError(() => game.nextDeal(), 'INVALID_PHASE');
-  expectError(() => game.bid('alice', 100), 'INVALID_PHASE');
+  expectError(() => game.bid('alice', BIDDING.MIN), 'INVALID_PHASE');
   expectError(() => game.declareMarriage('alice', 'H'), 'INVALID_PHASE');
 });
 
@@ -539,7 +646,7 @@ test('seeded games with the same script produce identical full deals', () => {
     let state = game.getState();
     const [opener, second, third] = state.activeBidderIds;
 
-    game.bid(opener, 100);
+    game.bid(opener, BIDDING.MIN);
     game.bid(second, 'pass');
     game.bid(third, 'pass');
 
@@ -548,6 +655,9 @@ test('seeded games with the same script produce identical full deals', () => {
     const opponents = state.players
       .map((player) => player.id)
       .filter((playerId) => playerId !== declarerId);
+
+    game.takePrikup(declarerId);
+    state = game.getState();
 
     let declarerHand = getStatePlayer(state, declarerId).hand;
     game.giveCard(opponents[0], declarerHand[0]);

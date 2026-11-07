@@ -35,9 +35,41 @@ test('engine errors become short Russian messages without internal ids', () => {
   assert.match(getActionErrorMessage({ code: 'ILLEGAL_CARD', message: 'Карта S10...' }), /масти/);
   assert.equal(
     getActionErrorMessage({ code: 'CANNOT_PASS' }),
-    'Открывающий торги обязан сказать 100 и не может пасовать.',
+    'Открывающий торги обязан сказать 80 и не может пасовать.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'NEGATIVE_SCORE_CANNOT_BID' }),
+    'При отрицательном счёте нельзя повышать ставку или пасовать. Можно только открыть 80.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'NEGATIVE_SCORE_NO_RAISE' }),
+    'При отрицательном счёте повышать заказ нельзя.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'RAISE_WINDOW_CLOSED' }),
+    'Повысить заказ можно только до первой отданной карты.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'RAISE_ALREADY_DECIDED' }),
+    'Решение о повышении заказа уже принято.',
   );
   assert.match(getActionErrorMessage({ code: 'MARRIAGE_NOT_ALLOWED' }), /первой завершённой взятки/);
+  assert.equal(
+    getActionErrorMessage({ code: 'MARRIAGE_PENDING' }),
+    'Сначала подтвердите или отмените объявленный марьяж.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'MARRIAGE_CARD_REQUIRED' }),
+    'После объявления марьяжа нужно выйти королём или дамой этой масти.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'NO_PENDING_MARRIAGE' }),
+    'Нет объявленного марьяжа для отмены.',
+  );
+  assert.equal(
+    getActionErrorMessage({ code: 'NOT_MARRIAGE_OWNER' }),
+    'Отменить марьяж может только объявивший его игрок.',
+  );
   assert.equal(getActionErrorMessage({ code: 'NOT_YOUR_TURN' }), 'Сейчас не ваш ход. Дождитесь своей очереди.');
 });
 
@@ -61,6 +93,58 @@ test('phase announcements describe the human bidding turn and current bid', () =
   assert.equal(
     getPhaseAnnouncement(createState({ currentPlayerId: 'alice' })),
     'Ход Алисы в торгах.',
+  );
+});
+
+test('phase announcements describe the public prikup reveal', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PRIKUP,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+    })),
+    'Прикуп раскрыт всем игрокам. Заберите три карты.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PRIKUP,
+      currentPlayerId: 'alice',
+      declarerId: 'alice',
+    })),
+    'Прикуп раскрыт всем игрокам. Алиса забирает карты.',
+  );
+});
+
+test('phase announcements include the final contract during gifts', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 85,
+    })),
+    'Отдар. Заказ — 85. Выберите по одной карте для Алисы и Бориса.',
+  );
+});
+
+test('phase announcements describe a pending marriage', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PLAYING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      pendingMarriage: { playerId: 'human', suit: 'H', value: 100 },
+    })),
+    'Марьяж: черви. Выйдите королём или дамой.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.PLAYING,
+      currentPlayerId: 'alice',
+      declarerId: 'alice',
+      pendingMarriage: { playerId: 'alice', suit: 'H', value: 100 },
+    })),
+    'Марьяж: черви. Алиса выходит королём или дамой.',
   );
 });
 

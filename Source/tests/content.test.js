@@ -73,6 +73,57 @@ test('rules cover every section of the rulebook', () => {
   }
 });
 
+test('prikup rules describe the public reveal before taking', () => {
+  const section = RULES_SECTIONS.find((entry) => entry.id === 'prikup');
+  const text = section.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+
+  assert.match(text, /прикуп раскрывается всем/i);
+  assert.match(text, /видны до взятия/i);
+  assert.match(text, /забирает их в руку/i);
+  assert.match(text, /скрытой карты прикупа больше нет/i);
+  assert.doesNotMatch(text, /видит только он/i);
+  assert.doesNotMatch(text, /не раскрывается до момента/i);
+});
+
+test('rules describe one contract raise after the prikup', () => {
+  const bidding = RULES_SECTIONS.find((entry) => entry.id === 'bidding');
+  const prikup = RULES_SECTIONS.find((entry) => entry.id === 'prikup');
+  const notImplemented = RULES_SECTIONS.find((entry) => entry.id === 'not-implemented');
+  const biddingText = bidding.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+  const prikupText = prikup.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+  const notImplementedText = notImplemented.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+
+  assert.match(biddingText, /один раз повысить заказ/i);
+  assert.match(prikupText, /один раз повысить заказ/i);
+  assert.match(prikupText, /до первой карты отдара/i);
+  assert.match(prikupText, /Играющий с отрицательным счётом не может повышать заказ/i);
+  assert.doesNotMatch(biddingText, /После прикупа ставка не повышается/i);
+  assert.doesNotMatch(notImplementedText, /повышение ставки после прикупа/i);
+});
+
+test('marriage rules require confirmation by king or queen', () => {
+  const section = RULES_SECTIONS.find((entry) => entry.id === 'marriages');
+  const text = section.blocks
+    .flatMap((block) => [block.text ?? '', ...(block.items ?? [])])
+    .join(' ');
+
+  assert.match(text, /выйти королём или дамой/);
+  assert.match(text, /только после этого хода/);
+  assert.match(text, /можно отменить/);
+  assert.match(text, /после подтверждения/i);
+  assert.doesNotMatch(text, /немедленно становится козырем/i);
+  assert.doesNotMatch(text, /Не требуется ходить/i);
+  assert.doesNotMatch(text, /сразу начисляется/i);
+});
+
 test('visible rules text is fully Russian', () => {
   const visibleText = RULES_SECTIONS.flatMap((section) => [
     section.title,

@@ -7,9 +7,11 @@ import {
   canDeclareMarriage,
   getAvailableMarriages,
   getLegalCards,
+  getMarriageConfirmationCards,
   getTrickPoints,
   getTrickWinner,
   isCardLegal,
+  isMarriageConfirmationCard,
 } from '../js/core/rules.js';
 
 const card = (id) => getCardById(id);
@@ -133,6 +135,25 @@ test('getAvailableMarriages lists undeclared king-queen pairs with bonuses', () 
 
   assert.deepEqual(getAvailableMarriages(hand, ['S']), [{ suit: 'H', value: 100 }]);
   assert.deepEqual(getAvailableMarriages(cards('SK', 'HQ'), []), []);
+});
+
+test('marriage confirmation helpers return the king and queen of a suit', () => {
+  const hand = cards('SK', 'SQ', 'HK', 'HA', 'D10');
+
+  assert.deepEqual(ids(getMarriageConfirmationCards(hand, 'S')), ['SK', 'SQ']);
+  assert.deepEqual(ids(getMarriageConfirmationCards(hand, 'H')), []);
+  assert.deepEqual(ids(getMarriageConfirmationCards(cards('SK'), 'S')), []);
+
+  assert.equal(isMarriageConfirmationCard(card('SK'), 'S'), true);
+  assert.equal(isMarriageConfirmationCard(card('SQ'), 'S'), true);
+  assert.equal(isMarriageConfirmationCard(card('SA'), 'S'), false);
+  assert.equal(isMarriageConfirmationCard(card('HK'), 'S'), false);
+  assert.equal(isMarriageConfirmationCard(card('SK'), 'H'), false);
+
+  assert.throws(
+    () => getMarriageConfirmationCards(hand, 'X'),
+    (error) => error instanceof GameError && error.code === 'INVALID_SUIT',
+  );
 });
 
 test('canDeclareMarriage checks all timing and hand conditions', () => {

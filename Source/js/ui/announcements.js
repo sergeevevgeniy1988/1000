@@ -52,12 +52,29 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
       return `${turn}${bid}`;
     }
     case PHASES.PRIKUP:
-      return `Прикуп. ${declarer?.isHuman ? 'Вы забираете карты.' : `${declarer?.name ?? 'Играющий'} забирает карты.`}`;
-    case PHASES.GIVING:
       return declarer?.isHuman
-        ? 'Прикуп и отдар. Выберите по одной карте для Алисы и Бориса.'
-        : `Отдар. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
+        ? 'Прикуп раскрыт всем игрокам. Заберите три карты.'
+        : `Прикуп раскрыт всем игрокам. ${declarer?.name ?? 'Играющий'} забирает карты.`;
+    case PHASES.GIVING: {
+      const contract = Number.isFinite(state.contract)
+        ? ` Заказ — ${state.contract}.`
+        : '';
+
+      return declarer?.isHuman
+        ? `Отдар.${contract} Выберите по одной карте для Алисы и Бориса.`
+        : `Отдар.${contract} ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
+    }
     case PHASES.PLAYING: {
+      const pending = state.pendingMarriage;
+
+      if (pending) {
+        const owner = findPlayer(state, pending.playerId);
+
+        return owner?.isHuman
+          ? `Марьяж: ${getSuitNameLower(pending.suit)}. Выйдите королём или дамой.`
+          : `Марьяж: ${getSuitNameLower(pending.suit)}. ${owner?.name ?? 'Игрок'} выходит королём или дамой.`;
+      }
+
       const trickNumber = Math.min(state.completedTricks.length + 1, DEAL.TRICKS);
       const turn = actor?.isHuman
         ? 'Ваш ход.'

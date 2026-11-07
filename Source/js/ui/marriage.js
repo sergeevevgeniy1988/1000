@@ -1,6 +1,6 @@
 import { SUIT_INFO } from '../core/constants.js';
 import { createElement } from './dom.js';
-import { formatMarriage } from './format.js';
+import { formatMarriage, getSuitNameLower } from './format.js';
 
 /**
  * Creates the button that opens the marriage picker. The button is only
@@ -33,6 +33,49 @@ export function createMarriageButton({ available, onOpen }) {
 
   button.addEventListener('click', onOpen);
   return button;
+}
+
+/**
+ * Shows the pending marriage status and, for the owner, the cancel action.
+ *
+ * @param {object} options
+ * @param {string} options.suit Declared marriage suit.
+ * @param {string} options.playerName Name of the declaring player.
+ * @param {boolean} options.isHuman Whether the current human owns the pending marriage.
+ * @param {(() => void) | null} options.onCancel Cancel handler for the owner.
+ * @returns {HTMLElement}
+ */
+export function createPendingMarriageStatus({
+  suit,
+  playerName,
+  isHuman,
+  onCancel,
+}) {
+  const wrapper = createElement('div', {
+    className: ['action-bar__group', 'marriage-pending'],
+  });
+  const text = isHuman
+    ? `Марьяж: ${getSuitNameLower(suit)}. Выйдите королём или дамой`
+    : `Марьяж: ${getSuitNameLower(suit)}. ${playerName} выходит королём или дамой`;
+
+  wrapper.append(createElement('span', {
+    className: 'action-bar__status',
+    text,
+  }));
+
+  if (onCancel) {
+    const cancelButton = createElement('button', {
+      className: ['button', 'button--ghost', 'marriage-cancel'],
+      text: 'Отменить',
+      attrs: { type: 'button', 'aria-label': 'Отменить объявленный марьяж' },
+      dataset: { action: 'cancel-marriage' },
+    });
+
+    cancelButton.addEventListener('click', onCancel);
+    wrapper.append(cancelButton);
+  }
+
+  return wrapper;
 }
 
 /**

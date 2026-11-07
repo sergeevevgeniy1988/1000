@@ -93,7 +93,7 @@ export const PHASES = Object.freeze({
 
 /** Bidding limits. Every bid must be within the range and divisible by the step. */
 export const BIDDING = Object.freeze({
-  MIN: 100,
+  MIN: 80,
   MAX: 120,
   STEP: 5,
 });
@@ -126,8 +126,11 @@ export const GAME_EVENTS = Object.freeze({
   BID: 'bid',
   PASS: 'pass',
   PRIKUP: 'prikup',
+  PRIKUP_REVEALED: 'prikuprevealed',
+  CONTRACT_RAISED: 'contractraised',
   GIFT: 'gift',
   MARRIAGE: 'marriage',
+  MARRIAGE_DECLARED: 'marriagedeclared',
   CARD_PLAYED: 'cardplayed',
   TRICK_WON: 'trickwon',
   SCORED: 'scored',

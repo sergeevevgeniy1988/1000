@@ -15,6 +15,7 @@ import {
   getLegalCards,
   getTrickPoints,
   getTrickWinner,
+  isMarriageConfirmationCard,
 } from './rules.js';
 import { checkGameOver, scoreDeal } from './scoring.js';
 
@@ -46,14 +47,18 @@ export class Game {
   #firstBidderId = null;
   #prikup = /** @type {Card[]} */ ([]);
   #prikupTaken = false;
+  #prikupRevealed = false;
   #contract = null;
+  #raiseDecided = false;
   #declarerId = null;
   #currentBid = 0;
   #activeBidderIds = /** @type {string[]} */ ([]);
   #currentBidderId = null;
+  #automaticPasses = 0;
   #givenCards = /** @type {{ fromId: string, toId: string, card: Card }[]} */ ([]);
   #trumpSuit = null;
   #trumpDeclaredBy = null;
+  #pendingMarriage = null;
   #currentTrick = /** @type {{ playerId: string, card: Card }[]} */ ([]);
   #trickLeaderId = null;
   #completedTricks = /** @type {{ winnerId: string, cards: { playerId: string, card: Card }[], points: number }[]} */ ([]);
@@ -111,9 +116,12 @@ export class Game {
   /**
    * Places a bid or passes during the BIDDING phase.
    *
-   * The opening bidder must bid exactly 100 and may not pass. Every following
-   * bid must be a multiple of five, greater than the current bid by at least
-   * five and no higher than 120. A bid of 120 ends bidding immediately.
+   * The opening bidder must bid exactly BIDDING.MIN (80) and may not pass.
+   * Every following bid must be a multiple of five, greater than the current
+   * bid by at least five and no higher than 120. A bid of 120 ends bidding
+   * immediately. A player with a negative score may only make the forced
+   * opening bid and cannot pass or raise voluntarily; such players are passed
+   * automatically by the engine when their turn comes.
    *
    * @param {string} playerId
    * @param {number | string | null} amountOrPass Bid amount, `null` or the
@@ -134,14 +142,26 @@ export class Game {
       this.#fail('NOT_YOUR_TURN', `Сейчас очередь не игрока ${player.name}.`);
     }
 
+    const negativeScore = player.score < 0;
     const passValue = typeof amountOrPass === 'string'
       ? amountOrPass.trim().toLowerCase()
       : null;
     const isPass = amountOrPass === null || passValue === 'pass' || passValue === 'пас';
 
     if (isPass) {
+      if (negativeScore) {
+        this.#fail(
+          'NEGATIVE_SCORE_CANNOT_BID',
+          `Игрок ${player.name} не может пасовать при отрицательном счёте.`,
+          { playerId: player.id, score: player.score },
+        );
+      }
+
       if (this.#currentBid === 0) {
-        this.#fail('CANNOT_PASS', 'Открывающий торги обязан сказать 100 и не может пасовать.');
+        this.#fail(
+          'CANNOT_PASS',
+          `Открывающий торги обязан сказать ${BIDDING.MIN} и не может пасовать.`,
+        );
       }
 
       this.#handlePass(player);
@@ -168,19 +188,177 @@ export class Game {
 
     if (this.#currentBid === 0) {
       if (amount !== BIDDING.MIN) {
-        this.#fail('INVALID_BID', 'Открывающая ставка должна быть ровно 100.', { amount });
+        if (negativeScore) {
+          this.#fail(
+            'NEGATIVE_SCORE_CANNOT_BID',
+            `При отрицательном счёте игрок ${player.name} может открыть торги только заявкой ${BIDDING.MIN}.`,
+            { playerId: player.id, score: player.score, amount },
+          );
+        }
+
+        this.#fail(
+          'INVALID_BID',
+          `Открывающая ставка должна быть ровно ${BIDDING.MIN}.`,
+          { amount },
+        );
       }
-    } else if (amount < this.#currentBid + BIDDING.STEP) {
-      this.#fail(
-        'INVALID_BID',
-        `Новая ставка должна быть выше текущей минимум на ${BIDDING.STEP}.`,
-        { amount, currentBid: this.#currentBid },
-      );
+    } else {
+      if (negativeScore) {
+        this.#fail(
+          'NEGATIVE_SCORE_CANNOT_BID',
+          `Игрок ${player.name} не может повышать ставку при отрицательном счёте.`,
+          { playerId: player.id, score: player.score, amount },
+        );
+      }
+
+      if (amount < this.#currentBid + BIDDING.STEP) {
+        this.#fail(
+          'INVALID_BID',
+          `Новая ставка должна быть выше текущей минимум на ${BIDDING.STEP}.`,
+          { amount, currentBid: this.#currentBid },
+        );
+      }
     }
 
     this.#handleBid(player, amount);
 
     return this.#emitStateChange();
+  }
+
+  /**
+   * Moves the publicly revealed prikup into the declarer's hand and opens the
+   * GIVING phase. Only the declarer may take the prikup, and only once.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When the prikup cannot be taken.
+   */
+  takePrikup(playerId) {
+    const player = this.#getPlayer(playerId);
+
+    if (this.#prikupTaken && this.#phase === PHASES.GIVING) {
+      this.#fail('PRIKUP_ALREADY_TAKEN', 'Прикуп уже взят в этой раздаче.');
+    }
+
+    this.#assertPhase(PHASES.PRIKUP, 'takePrikup');
+
+    if (player.id !== this.#declarerId) {
+      const declarer = this.#getPlayer(this.#declarerId);
+
+      this.#fail(
+        'NOT_DECLARER',
+        `Прикуп может забрать только играющий ${declarer.name}.`,
+        { playerId: player.id, declarerId: this.#declarerId },
+      );
+    }
+
+    const cards = this.#prikup.map((card) => card.id);
+
+    player.hand.push(...this.#prikup);
+    this.#prikupTaken = true;
+    this.#raiseDecided = false;
+    this.#phase = PHASES.GIVING;
+
+    const payload = deepFreeze({
+      declarerId: player.id,
+      cards,
+      handSize: player.hand.length,
+    });
+
+    this.#addLog('prikup', { playerId: player.id, count: cards.length });
+    this.#emitter.emit(GAME_EVENTS.PRIKUP, payload);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Raises the contract once after the prikup is taken and before the first
+   * gift. Passing `null` declines the raise and leaves the contract unchanged.
+   *
+   * @param {string} playerId
+   * @param {number | null} amountOrNull New contract or null to decline.
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When the raise is not allowed.
+   */
+  raiseContract(playerId, amountOrNull) {
+    this.#assertPhase(PHASES.GIVING, 'raiseContract');
+
+    const player = this.#getPlayer(playerId);
+
+    if (player.id !== this.#declarerId) {
+      this.#fail(
+        'NOT_DECLARER',
+        'Только играющий может повысить заказ.',
+        { playerId: player.id, declarerId: this.#declarerId },
+      );
+    }
+
+    if (this.#givenCards.length > 0) {
+      this.#fail(
+        'RAISE_WINDOW_CLOSED',
+        'Повысить заказ можно только до первой отданной карты.',
+      );
+    }
+
+    if (this.#raiseDecided) {
+      this.#fail('RAISE_ALREADY_DECIDED', 'Решение о повышении заказа уже принято.');
+    }
+
+    if (amountOrNull === null) {
+      this.#raiseDecided = true;
+      return this.#emitStateChange();
+    }
+
+    if (player.score < 0) {
+      this.#fail(
+        'NEGATIVE_SCORE_NO_RAISE',
+        `Игрок ${player.name} не может повышать заказ при отрицательном счёте.`,
+        { playerId: player.id, score: player.score },
+      );
+    }
+
+    if (
+      typeof amountOrNull !== 'number'
+      || !Number.isInteger(amountOrNull)
+      || amountOrNull % BIDDING.STEP !== 0
+      || amountOrNull <= this.#contract
+      || amountOrNull > BIDDING.MAX
+    ) {
+      this.#fail(
+        'INVALID_RAISE',
+        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${BIDDING.MAX}.`,
+        { amount: amountOrNull, contract: this.#contract },
+      );
+    }
+
+    const previousContract = this.#contract;
+
+    this.#contract = amountOrNull;
+    player.bid = amountOrNull;
+    this.#currentBid = amountOrNull;
+    this.#raiseDecided = true;
+
+    const payload = deepFreeze({
+      playerId: player.id,
+      amount: amountOrNull,
+      contract: amountOrNull,
+      previousContract,
+    });
+
+    this.#addLog('contractraised', payload);
+    this.#emitter.emit(GAME_EVENTS.CONTRACT_RAISED, payload);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Declines the optional contract raise.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   */
+  declineRaise(playerId) {
+    return this.raiseContract(playerId, null);
   }
 
   /**
@@ -218,6 +396,10 @@ export class Game {
       });
     }
 
+    if (this.#givenCards.length === 0) {
+      this.#raiseDecided = true;
+    }
+
     declarer.hand.splice(cardIndex, 1);
     target.hand.push(card);
     this.#givenCards.push({ fromId: declarer.id, toId: target.id, card });
@@ -242,8 +424,9 @@ export class Game {
   }
 
   /**
-   * Declares a marriage before leading a trick. The suit immediately becomes
-   * trump and its bonus is added to the player's deal total.
+   * Declares a marriage before leading a trick. The declaration is pending
+   * until the declarer leads the king or queen of the declared suit; only then
+   * do the trump suit and bonus take effect.
    *
    * @param {string} playerId
    * @param {string} suit Marriage suit id: S, C, D or H.
@@ -257,6 +440,10 @@ export class Game {
 
     if (this.#getActingPlayerId() !== player.id) {
       this.#fail('NOT_YOUR_TURN', `Сейчас очередь не игрока ${player.name}.`);
+    }
+
+    if (this.#pendingMarriage !== null) {
+      this.#fail('MARRIAGE_PENDING', 'Сначала подтвердите или отмените объявленный марьяж.');
     }
 
     if (this.#currentTrick.length > 0) {
@@ -286,22 +473,43 @@ export class Game {
       this.#fail('MARRIAGE_UNAVAILABLE', 'Для этого марьяжа нужны король и дама на руке.');
     }
 
-    player.marriagePoints += marriage.value;
-    player.declaredMarriages.push(suit);
-    this.#trumpSuit = suit;
-    this.#trumpDeclaredBy = player.id;
-    this.#marriagesThisTurn += 1;
+    this.#pendingMarriage = {
+      playerId: player.id,
+      suit,
+      value: marriage.value,
+    };
 
     const payload = deepFreeze({
       playerId: player.id,
       suit,
       value: marriage.value,
-      trumpSuit: suit,
-      marriagePoints: player.marriagePoints,
     });
 
-    this.#addLog('marriage', payload);
-    this.#emitter.emit(GAME_EVENTS.MARRIAGE, payload);
+    this.#emitter.emit(GAME_EVENTS.MARRIAGE_DECLARED, payload);
+
+    return this.#emitStateChange();
+  }
+
+  /**
+   * Cancels a pending marriage before its confirmation card is played.
+   *
+   * @param {string} playerId
+   * @returns {object} A frozen state snapshot.
+   * @throws {GameError} When there is no pending marriage or it belongs to
+   *   another player.
+   */
+  cancelMarriage(playerId) {
+    const player = this.#getPlayer(playerId);
+
+    if (this.#pendingMarriage === null) {
+      this.#fail('NO_PENDING_MARRIAGE', 'Нет объявленного марьяжа для отмены.');
+    }
+
+    if (this.#pendingMarriage.playerId !== player.id) {
+      this.#fail('NOT_MARRIAGE_OWNER', 'Отменить марьяж может только объявивший его игрок.');
+    }
+
+    this.#pendingMarriage = null;
 
     return this.#emitStateChange();
   }
@@ -334,6 +542,19 @@ export class Game {
       });
     }
 
+    const pendingMarriage = this.#pendingMarriage;
+
+    if (
+      pendingMarriage !== null
+      && !isMarriageConfirmationCard(card, pendingMarriage.suit)
+    ) {
+      this.#fail(
+        'MARRIAGE_CARD_REQUIRED',
+        'После объявления марьяжа нужно выйти королём или дамой этой масти.',
+        { cardId: card.id, suit: pendingMarriage.suit },
+      );
+    }
+
     const leadSuit = this.#currentTrick.length === 0
       ? null
       : this.#currentTrick[0].card.suit;
@@ -346,6 +567,26 @@ export class Game {
         `Карта ${card.id} не является легальной в текущей взятке.`,
         { cardId: card.id, leadSuit, trumpSuit: this.#trumpSuit },
       );
+    }
+
+    if (pendingMarriage !== null) {
+      player.marriagePoints += pendingMarriage.value;
+      player.declaredMarriages.push(pendingMarriage.suit);
+      this.#trumpSuit = pendingMarriage.suit;
+      this.#trumpDeclaredBy = player.id;
+      this.#marriagesThisTurn += 1;
+
+      const marriagePayload = deepFreeze({
+        playerId: player.id,
+        suit: pendingMarriage.suit,
+        value: pendingMarriage.value,
+        trumpSuit: pendingMarriage.suit,
+        marriagePoints: player.marriagePoints,
+      });
+
+      this.#addLog('marriage', marriagePayload);
+      this.#emitter.emit(GAME_EVENTS.MARRIAGE, marriagePayload);
+      this.#pendingMarriage = null;
     }
 
     player.hand.splice(cardIndex, 1);
@@ -441,8 +682,9 @@ export class Game {
   }
 
   /**
-   * Returns a frozen snapshot that hides every other player's hand, the hidden
-   * prikup and the deck order. This is the only state AI code may receive.
+   * Returns a frozen snapshot that hides every other player's hand, the prikup
+   * until it is publicly revealed, and the deck order. This is the only state
+   * AI code may receive.
    *
    * @param {string} playerId
    * @returns {object}
@@ -507,14 +749,18 @@ export class Game {
 
     this.#prikup = [];
     this.#prikupTaken = false;
+    this.#prikupRevealed = false;
     this.#contract = null;
+    this.#raiseDecided = false;
     this.#declarerId = null;
     this.#currentBid = 0;
     this.#activeBidderIds = [];
     this.#currentBidderId = null;
+    this.#automaticPasses = 0;
     this.#givenCards = [];
     this.#trumpSuit = null;
     this.#trumpDeclaredBy = null;
+    this.#pendingMarriage = null;
     this.#currentTrick = [];
     this.#trickLeaderId = null;
     this.#completedTricks = [];
@@ -546,36 +792,67 @@ export class Game {
       return;
     }
 
-    const nextBidderId = this.#findNextActiveBidder(player.id);
-
-    if (nextBidderId === null) {
-      this.#finishBidding(player.id);
-      return;
-    }
-
-    this.#currentBidderId = nextBidderId;
+    this.#advanceBidding(player.id);
   }
 
   /**
-   * Applies a pass and advances bidding or finishes it.
+   * Applies a voluntary pass and advances bidding or finishes it.
    *
    * @param {object} player
    */
   #handlePass(player) {
+    this.#markPassed(player, false);
+    this.#advanceBidding(player.id);
+  }
+
+  /**
+   * Marks a player as passed and emits the public pass event.
+   *
+   * @param {object} player
+   * @param {boolean} automatic
+   */
+  #markPassed(player, automatic) {
     player.passed = true;
     this.#activeBidderIds = this.#activeBidderIds.filter((id) => id !== player.id);
 
-    const payload = deepFreeze({ playerId: player.id });
+    if (automatic) {
+      this.#automaticPasses += 1;
+    }
+
+    const payload = automatic
+      ? deepFreeze({ playerId: player.id, automatic: true })
+      : deepFreeze({ playerId: player.id });
 
     this.#addLog('pass', payload);
     this.#emitter.emit(GAME_EVENTS.PASS, payload);
+  }
 
+  /**
+   * Moves the turn to the next active player, automatically passing negative
+   * players. Finishes bidding when only one active player remains.
+   *
+   * @param {string} fromPlayerId
+   */
+  #advanceBidding(fromPlayerId) {
     if (this.#activeBidderIds.length === 1) {
       this.#finishBidding(this.#activeBidderIds[0]);
       return;
     }
 
-    const nextBidderId = this.#findNextActiveBidder(player.id);
+    let nextBidderId = this.#findNextActiveBidder(fromPlayerId);
+
+    while (nextBidderId !== null && this.#shouldAutoPass(nextBidderId)) {
+      const nextBidder = this.#getPlayer(nextBidderId);
+
+      this.#markPassed(nextBidder, true);
+
+      if (this.#activeBidderIds.length === 1) {
+        this.#finishBidding(this.#activeBidderIds[0]);
+        return;
+      }
+
+      nextBidderId = this.#findNextActiveBidder(nextBidderId);
+    }
 
     if (nextBidderId === null) {
       this.#finishBidding(this.#activeBidderIds[0]);
@@ -586,38 +863,57 @@ export class Game {
   }
 
   /**
-   * Finishes bidding, assigns the contract and moves the prikup to the
-   * declarer. The PRIKUP event is emitted while the phase is PRIKUP; immediately
-   * afterwards the phase becomes GIVING.
+   * Returns true when the player must be passed automatically because of a
+   * negative score. The forced opening bid is never auto-passed.
+   *
+   * @param {string} playerId
+   * @returns {boolean}
+   */
+  #shouldAutoPass(playerId) {
+    if (this.#automaticPasses >= PLAYER_COUNT) {
+      return false;
+    }
+
+    if (this.#currentBid === 0) {
+      return false;
+    }
+
+    return this.#getPlayer(playerId).score < 0;
+  }
+
+  /**
+   * Finishes bidding, assigns the contract and reveals the prikup to every
+   * player. The declarer takes the revealed cards separately with
+   * {@link Game#takePrikup}.
    *
    * @param {string} winnerId
    */
   #finishBidding(winnerId) {
-    const winner = this.#getPlayer(winnerId);
-
     this.#phase = PHASES.PRIKUP;
     this.#declarerId = winnerId;
     this.#contract = this.#currentBid;
     this.#activeBidderIds = [winnerId];
     this.#currentBidderId = null;
+    this.#prikupTaken = false;
+    this.#prikupRevealed = true;
 
     for (const player of this.#players) {
       player.isDeclarer = player.id === winnerId;
     }
 
     const prikupCards = this.#prikup.map((card) => card.id);
-    winner.hand.push(...this.#prikup);
-    this.#prikupTaken = true;
-
     const payload = deepFreeze({
       declarerId: winnerId,
       cards: prikupCards,
-      handSize: winner.hand.length,
+      contract: this.#contract,
     });
 
-    this.#addLog('prikup', { playerId: winnerId, count: prikupCards.length });
-    this.#emitter.emit(GAME_EVENTS.PRIKUP, payload);
-    this.#phase = PHASES.GIVING;
+    this.#addLog('prikuprevealed', {
+      playerId: winnerId,
+      cards: prikupCards,
+      count: prikupCards.length,
+    });
+    this.#emitter.emit(GAME_EVENTS.PRIKUP_REVEALED, payload);
   }
 
   /**
@@ -652,6 +948,7 @@ export class Game {
     this.#currentTrick = [];
     this.#trickLeaderId = winnerId;
     this.#marriagesThisTurn = 0;
+    this.#pendingMarriage = null;
 
     if (this.#completedTricks.length === DEAL.TRICKS) {
       this.#scoreDeal();
@@ -748,8 +1045,7 @@ export class Game {
     const dealer = this.#dealerIndex === null
       ? null
       : this.#players[this.#dealerIndex];
-    const prikupVisible = viewerId === null
-      || (this.#prikupTaken && viewerId === this.#declarerId);
+    const prikupVisible = viewerId === null || this.#prikupRevealed;
 
     const players = this.#players.map((player) => {
       const handVisible = viewerId === null || viewerId === player.id;
@@ -781,8 +1077,10 @@ export class Game {
       firstBidderId: this.#firstBidderId,
       players,
       prikup: prikupVisible ? this.#prikup.map((card) => card.id) : [],
+      prikupRevealed: this.#prikupRevealed,
       prikupTaken: this.#prikupTaken,
       contract: this.#contract,
+      raiseDecided: this.#raiseDecided,
       declarerId: this.#declarerId,
       currentBid: this.#currentBid,
       activeBidderIds: [...this.#activeBidderIds],
@@ -795,6 +1093,13 @@ export class Game {
       })),
       trumpSuit: this.#trumpSuit,
       trumpDeclaredBy: this.#trumpDeclaredBy,
+      pendingMarriage: this.#pendingMarriage
+        ? {
+          playerId: this.#pendingMarriage.playerId,
+          suit: this.#pendingMarriage.suit,
+          value: this.#pendingMarriage.value,
+        }
+        : null,
       currentTrick: this.#currentTrick.map((entry) => ({
         playerId: entry.playerId,
         cardId: entry.card.id,
