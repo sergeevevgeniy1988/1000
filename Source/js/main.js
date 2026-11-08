@@ -1,4 +1,5 @@
 import { TARGET_SCORE } from './core/constants.js';
+import { LocalSession } from './session/local-session.js';
 import { Controller } from './ui/controller.js';
 import { createLogDrawer } from './ui/log-drawer.js';
 import { hasSeenOnboarding, openOnboarding } from './ui/onboarding.js';
@@ -103,11 +104,15 @@ function bootstrap() {
     backdrop: elements.logBackdrop,
   });
 
-  const controller = new Controller({
+  const session = new LocalSession({
     players: PLAYERS,
     humanId: HUMAN_ID,
     seed: getSeedFromUrl(),
     targetScore: getTargetFromUrl(),
+  });
+
+  const controller = new Controller({
+    session,
     elements: { ...elements, logDrawer },
   });
 

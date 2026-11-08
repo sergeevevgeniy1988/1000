@@ -1,6 +1,6 @@
 import { BIDDING } from '../core/constants.js';
 import { createElement } from './dom.js';
-import { nameDative } from './format.js';
+import { formatDativeNames, nameDative, resolveViewerId } from './format.js';
 import { createCard, sortHand } from './hand.js';
 import { openModal } from './modals.js';
 import { getRaiseOptions } from './raise.js';
@@ -11,21 +11,24 @@ import { getRaiseOptions } from './raise.js';
  * is pressed.
  *
  * @param {object} options
- * @param {object} options.state Full state snapshot.
+ * @param {object} options.state Player view snapshot.
+ * @param {string | null} [options.viewerId] Seat the UI shows.
  * @param {() => void} options.onTakePrikup Called when the prikup is taken.
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openPrikupRevealModal({ state, onTakePrikup }) {
+export function openPrikupRevealModal({ state, viewerId = null, onTakePrikup }) {
   const declarer = state.players.find((player) => player.id === state.declarerId);
+  const resolvedViewerId = viewerId ?? resolveViewerId(state);
 
   if (!declarer || !Array.isArray(state.prikup) || state.prikup.length === 0) {
     return null;
   }
 
+  const isDeclarerSelf = declarer.id === resolvedViewerId;
   const body = createElement('div', { className: 'prikup' });
   const intro = createElement('p', {
     className: 'prikup__intro',
-    text: declarer.isHuman
+    text: isDeclarerSelf
       ? 'Прикуп раскрыт всем игрокам. Заберите три карты, затем при желании повысьте заказ и отдайте по одной карте каждому сопернику.'
       : `${declarer.name} раскрывает прикуп. Три карты видны всем игрокам; после продолжения ${declarer.name} заберёт их, решит, повышать ли заказ, и отдаст карты соперникам.`,
   });
@@ -60,7 +63,7 @@ export function openPrikupRevealModal({ state, onTakePrikup }) {
     body,
     footer,
     actions: [{
-      label: declarer.isHuman ? 'Забрать прикуп' : 'Продолжить',
+      label: isDeclarerSelf ? 'Забрать прикуп' : 'Продолжить',
       onClick: () => onTakePrikup?.(),
       variant: 'primary',
       action: 'take-prikup',
@@ -76,16 +79,17 @@ export function openPrikupRevealModal({ state, onTakePrikup }) {
  * is taken and before the first gift.
  *
  * @param {object} options
- * @param {object} options.state Full state snapshot.
- * @param {string} options.humanId Human player id.
+ * @param {object} options.state Player view snapshot.
+ * @param {string} options.viewerId Seat the UI shows.
  * @param {(amount: number) => void} options.onRaise
  * @param {() => void} options.onDecline
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openRaiseModal({ state, humanId, onRaise, onDecline }) {
+export function openRaiseModal({ state, viewerId, onRaise, onDecline }) {
   const declarer = state.players.find((player) => player.id === state.declarerId);
+  const resolvedViewerId = viewerId ?? resolveViewerId(state);
 
-  if (!declarer || declarer.id !== humanId) {
+  if (!declarer || declarer.id !== resolvedViewerId) {
     return null;
   }
 
@@ -144,23 +148,28 @@ export function openRaiseModal({ state, humanId, onRaise, onDecline }) {
  * The declarer chooses exactly one card for each opponent.
  *
  * @param {object} options
- * @param {object} options.state Full state snapshot.
- * @param {string} options.humanId Human player id.
+ * @param {object} options.state Player view snapshot.
+ * @param {string} options.viewerId Seat the UI shows.
  * @param {(gifts: { toPlayerId: string, cardId: string }[]) => void} options.onConfirm
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openGiftModal({ state, humanId, onConfirm }) {
-  const human = state.players.find((player) => player.id === humanId);
+export function openGiftModal({ state, viewerId, onConfirm }) {
+  const resolvedViewerId = viewerId ?? resolveViewerId(state);
+  const human = state.players.find((player) => player.id === resolvedViewerId);
 
   if (!human) {
     return null;
   }
 
-  const opponents = state.players.filter((player) => player.id !== humanId);
+  const opponents = state.players.filter((player) => player.id !== resolvedViewerId);
 
   if (opponents.length !== 2) {
     return null;
   }
+
+  const opponentDativeNames = formatDativeNames(opponents.map((player) => player.name));
+  const opponentSubtitle = `Одна карта ${nameDative(opponents[0].name)}, `
+    + `одна карта ${nameDative(opponents[1].name)}`;
 
   const prikupSet = new Set(state.prikup);
   const selections = new Map(opponents.map((player) => [player.id, null]));
@@ -171,7 +180,7 @@ export function openGiftModal({ state, humanId, onConfirm }) {
   const intro = createElement('p', {
     className: 'prikup__intro',
     text: `Заказ ${state.contract}. Вы забрали прикуп. Отдайте ровно по одной карте `
-      + 'Алисе и Борису: сначала выберите карту для одного соперника, затем для другого. '
+      + `${opponentDativeNames}: сначала выберите карту для одного соперника, затем для другого. `
       + 'Нажмите на слот соперника, чтобы перевыбрать карту.',
   });
 
@@ -390,7 +399,7 @@ export function openGiftModal({ state, humanId, onConfirm }) {
   return openModal({
     kind: 'prikup',
     title: 'Отдар',
-    subtitle: 'Одна карта Алисе, одна карта Борису',
+    subtitle: opponentSubtitle,
     body,
     footer,
     dismissible: false,

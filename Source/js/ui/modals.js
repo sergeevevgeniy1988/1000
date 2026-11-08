@@ -7,6 +7,7 @@ import {
   formatScore,
   formatSignedScore,
   formatTricks,
+  resolveViewerId,
 } from './format.js';
 
 let currentModal = null;
@@ -369,6 +370,7 @@ function createCell(value, label = '') {
  * @returns {HTMLElement}
  */
 function createDealResultTable(state, result) {
+  const viewerId = resolveViewerId(state);
   const wrapper = createElement('div', { className: 'result-table-wrap' });
   const table = createElement('table', { className: 'result-table' });
   const head = createElement('thead');
@@ -389,7 +391,7 @@ function createDealResultTable(state, result) {
     const row = createElement('tr', {
       className: [
         playerResult.isDeclarer ? 'result-row--declarer' : '',
-        player?.isHuman ? 'result-row--human' : '',
+        player && player.id === viewerId ? 'result-row--human' : '',
       ].filter(Boolean),
     });
     const nameCell = createElement('th', {
@@ -629,13 +631,15 @@ function createFinalTable(state) {
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
 export function openGameOverModal(state, { onNewGame }) {
+  const viewerId = resolveViewerId(state);
   const winner = findPlayer(state, state.winnerId);
-  const human = state.players.find((player) => player.isHuman) ?? null;
+  const viewer = viewerId === null ? null : findPlayer(state, viewerId);
+  const winnerIsViewer = winner !== null && winner.id === viewerId;
   const body = createElement('div', { className: 'game-over' });
   const hero = createElement('div', {
     className: [
       'game-over__hero',
-      winner?.isHuman ? 'game-over__hero--human' : '',
+      winnerIsViewer ? 'game-over__hero--human' : '',
     ].filter(Boolean),
   });
 
@@ -646,14 +650,14 @@ export function openGameOverModal(state, { onNewGame }) {
     }),
     createElement('h3', {
       className: 'game-over__title',
-      text: winner?.isHuman ? 'Вы победили!' : `Победа: ${winner?.name ?? '—'}`,
+      text: winnerIsViewer ? 'Вы победили!' : `Победа: ${winner?.name ?? '—'}`,
     }),
     createElement('p', {
       className: 'game-over__text',
-      text: winner?.isHuman
+      text: winnerIsViewer
         ? `Партия завершена за ${formatDeals(state.dealNumber)}.`
         : `Партия завершена за ${formatDeals(state.dealNumber)}. Ваш счёт — ${formatScore(
-          human?.score ?? 0,
+          viewer?.score ?? 0,
         )}.`,
     }),
   );

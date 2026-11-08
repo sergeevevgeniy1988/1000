@@ -4,6 +4,11 @@ import test from 'node:test';
 import { DEAL, PHASES } from '../js/core/constants.js';
 import { getPhaseAnnouncement } from '../js/ui/announcements.js';
 import { getActionErrorMessage } from '../js/ui/errors.js';
+import {
+  formatDativeNames,
+  formatGenitiveNames,
+  resolveViewerId,
+} from '../js/ui/format.js';
 
 /**
  * @param {Partial<object>} [overrides]
@@ -11,6 +16,7 @@ import { getActionErrorMessage } from '../js/ui/errors.js';
  */
 function createState(overrides = {}) {
   return {
+    viewerId: 'human',
     phase: PHASES.BIDDING,
     dealNumber: 1,
     targetScore: 1000,
@@ -23,12 +29,32 @@ function createState(overrides = {}) {
     lastDealResult: null,
     winnerId: null,
     players: [
-      { id: 'alice', name: 'Алиса', isHuman: false },
-      { id: 'boris', name: 'Борис', isHuman: false },
-      { id: 'human', name: 'Вы', isHuman: true },
+      { id: 'alice', name: 'Алиса', isHuman: false, isAI: true },
+      { id: 'boris', name: 'Борис', isHuman: false, isAI: true },
+      { id: 'human', name: 'Вы', isHuman: true, isAI: false },
     ],
     ...overrides,
   };
+}
+
+/**
+ * A state with two live people at the table and one AI seat.
+ *
+ * @param {Partial<object>} [overrides]
+ * @returns {object}
+ */
+function createMultiHumanState(overrides = {}) {
+  return createState({
+    viewerId: 'host',
+    dealerId: 'host',
+    currentPlayerId: 'host',
+    players: [
+      { id: 'host', name: 'Иван', isHuman: true, isAI: false },
+      { id: 'guest', name: 'Анна', isHuman: true, isAI: false },
+      { id: 'ai', name: 'Борис', isHuman: false, isAI: true },
+    ],
+    ...overrides,
+  });
 }
 
 test('engine errors become short Russian messages without internal ids', () => {
@@ -188,4 +214,75 @@ test('phase announcements report a completed trick and the winner', () => {
     })),
     'Игра окончена. Победитель — Вы.',
   );
+});
+
+test('announcements follow the viewer when two live people are at the table', () => {
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState()),
+    'Ваш ход в торгах.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({ currentPlayerId: 'guest' })),
+    'Ход Анны в торгах.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({ currentPlayerId: 'ai' })),
+    'Ход Бориса в торгах.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      viewerId: 'guest',
+      currentPlayerId: 'host',
+    })),
+    'Ход Ивана в торгах.',
+  );
+});
+
+test('announcements build gift names from the current players', () => {
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      phase: PHASES.GIVING,
+      declarerId: 'host',
+      contract: 85,
+    })),
+    'Отдар. Заказ — 85. Выберите по одной карте для Анны и Бориса.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      viewerId: 'guest',
+      phase: PHASES.GIVING,
+      declarerId: 'host',
+      contract: 85,
+    })),
+    'Отдар. Заказ — 85. Иван отдаёт карты соперникам.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      phase: PHASES.PRIKUP,
+      declarerId: 'host',
+    })),
+    'Прикуп раскрыт всем игрокам. Заберите три карты.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      viewerId: 'guest',
+      phase: PHASES.PRIKUP,
+      declarerId: 'host',
+    })),
+    'Прикуп раскрыт всем игрокам. Иван забирает карты.',
+  );
+});
+
+test('viewer resolution and name lists keep the "Вы" forms', () => {
+  assert.equal(resolveViewerId(createState()), 'human');
+  assert.equal(resolveViewerId(createMultiHumanState()), 'host');
+  assert.equal(resolveViewerId(createMultiHumanState({ viewerId: undefined })), null);
+  assert.equal(
+    resolveViewerId(createMultiHumanState({ viewerId: undefined }), 'guest'),
+    'guest',
+  );
+  assert.equal(formatGenitiveNames(['Анна', 'Борис']), 'Анны и Бориса');
+  assert.equal(formatDativeNames(['Анна', 'Борис']), 'Анне и Борису');
+  assert.equal(formatGenitiveNames(['Вы']), 'Вас');
+  assert.equal(formatDativeNames(['Вы']), 'Вам');
 });

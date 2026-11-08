@@ -1,9 +1,11 @@
 import { DEAL, PHASES } from '../core/constants.js';
 import {
+  formatGenitiveNames,
   formatPoints,
   getPhaseName,
   getSuitNameLower,
   nameGenitive,
+  resolveViewerId,
 } from './format.js';
 
 /**
@@ -21,7 +23,7 @@ function findPlayer(state, playerId) {
  *
  * @param {object} state
  * @param {object} [options]
- * @param {string | null} [options.humanId]
+ * @param {string | null} [options.humanId] Backward-compatible viewer id.
  * @param {{ winnerId: string, points: number } | null} [options.reveal]
  * @returns {string}
  */
@@ -32,6 +34,7 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
     return `Взятка: ${formatPoints(reveal.points)}. Победитель — ${winner?.name ?? 'неизвестен'}.`;
   }
 
+  const viewerId = resolveViewerId(state, humanId);
   const actor = findPlayer(state, state.currentPlayerId);
   const declarer = findPlayer(state, state.declarerId);
   const trump = state.trumpSuit
@@ -44,7 +47,7 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
     case PHASES.DEALING:
       return `Раздача ${state.dealNumber}.`;
     case PHASES.BIDDING: {
-      const turn = actor?.isHuman
+      const turn = actor && actor.id === viewerId
         ? 'Ваш ход в торгах.'
         : (actor ? `Ход ${nameGenitive(actor.name)} в торгах.` : 'Торги.');
       const bid = state.currentBid > 0 ? ` Текущая ставка — ${state.currentBid}.` : '';
@@ -52,7 +55,7 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
       return `${turn}${bid}`;
     }
     case PHASES.PRIKUP:
-      return declarer?.isHuman
+      return declarer && declarer.id === viewerId
         ? 'Прикуп раскрыт всем игрокам. Заберите три карты.'
         : `Прикуп раскрыт всем игрокам. ${declarer?.name ?? 'Играющий'} забирает карты.`;
     case PHASES.GIVING: {
@@ -60,9 +63,14 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
         ? ` Заказ — ${state.contract}.`
         : '';
 
-      return declarer?.isHuman
-        ? `Отдар.${contract} Выберите по одной карте для Алисы и Бориса.`
-        : `Отдар.${contract} ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
+      if (declarer && declarer.id === viewerId) {
+        const opponents = state.players.filter((player) => player.id !== viewerId);
+        const names = formatGenitiveNames(opponents.map((player) => player.name));
+
+        return `Отдар.${contract} Выберите по одной карте для ${names || 'соперников'}.`;
+      }
+
+      return `Отдар.${contract} ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам.`;
     }
     case PHASES.PLAYING: {
       const pending = state.pendingMarriage;
@@ -70,13 +78,13 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
       if (pending) {
         const owner = findPlayer(state, pending.playerId);
 
-        return owner?.isHuman
+        return owner && owner.id === viewerId
           ? `Марьяж: ${getSuitNameLower(pending.suit)}. Выйдите королём или дамой.`
           : `Марьяж: ${getSuitNameLower(pending.suit)}. ${owner?.name ?? 'Игрок'} выходит королём или дамой.`;
       }
 
       const trickNumber = Math.min(state.completedTricks.length + 1, DEAL.TRICKS);
-      const turn = actor?.isHuman
+      const turn = actor && actor.id === viewerId
         ? 'Ваш ход.'
         : (actor ? `Ход ${nameGenitive(actor.name)}.` : 'Розыгрыш.');
 

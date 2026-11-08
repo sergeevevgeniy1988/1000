@@ -1,7 +1,7 @@
 import { PHASES, RANK_INFO, SUITS, SUIT_INFO } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
 import { clearElement, createElement } from './dom.js';
-import { formatCards, getCardLabel } from './format.js';
+import { formatCards, getCardLabel, resolveViewerId } from './format.js';
 
 const SUIT_ORDER = new Map(SUITS.map((suit, index) => [suit, index]));
 
@@ -176,12 +176,13 @@ export function createOpponentHand(cardCount) {
 }
 
 /**
- * Renders the human hand from a game state snapshot.
+ * Renders the viewer's hand from a game state snapshot.
  *
  * @param {object} state
  * @param {object} elements
  * @param {HTMLElement} elements.handEl
- * @param {string} elements.playerId
+ * @param {string} [elements.viewerId] Player whose seat the UI shows.
+ * @param {string} [elements.playerId] Backward-compatible alias for `viewerId`.
  * @param {((card: Card) => void) | null} [elements.onCardSelect]
  * @param {ReadonlyArray<string> | null} [elements.legalCardIds]
  * @param {(() => void) | null} [elements.onIllegalCard]
@@ -189,12 +190,14 @@ export function createOpponentHand(cardCount) {
 export function renderHand(state, elements) {
   const {
     handEl,
-    playerId,
+    viewerId = null,
+    playerId = null,
     onCardSelect = null,
     legalCardIds = null,
     onIllegalCard = null,
   } = elements;
-  const player = state.players.find((entry) => entry.id === playerId);
+  const resolvedViewerId = viewerId ?? playerId ?? resolveViewerId(state);
+  const player = state.players.find((entry) => entry.id === resolvedViewerId);
   const previousCards = handEl.querySelector('.hand__cards');
   const previousScrollLeft = previousCards instanceof HTMLElement
     ? previousCards.scrollLeft

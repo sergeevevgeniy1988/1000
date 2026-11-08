@@ -1,11 +1,14 @@
-import { BIDDING, GAME_EVENTS, PHASES, TARGET_SCORE } from '../core/constants.js';
+import { BIDDING, GAME_EVENTS, PHASES } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
-import { Game } from '../core/game.js';
-import { mulberry32 } from '../core/rng.js';
 import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { clearElement, createElement } from './dom.js';
-import { getPhaseName, nameGenitive } from './format.js';
+import {
+  formatGenitiveNames,
+  getPhaseName,
+  nameGenitive,
+  resolveViewerId,
+} from './format.js';
 import { createAnnouncer, getPhaseAnnouncement } from './announcements.js';
 import { getActionErrorMessage } from './errors.js';
 import { captureFocus, focusFirstLegalCard, restoreFocus } from './focus.js';
@@ -46,18 +49,13 @@ const BUBBLE_PHASES = new Set([PHASES.BIDDING, PHASES.GIVING]);
  */
 
 /**
- * Connects the pure game engine to the browser. The controller owns the only
- * AI timer, renders every state change and validates every human action through
- * the public `Game` API.
+ * Connects a game session to the browser. The controller owns the only AI
+ * timer, renders every state change and validates every viewer action through
+ * the session API. It never creates `Game` instances itself.
  */
 export class Controller {
-  #players;
-  #humanId;
+  #session = null;
   #elements;
-  #seed;
-  #targetScore;
-  #game = null;
-  #gameIndex = 0;
   #started = false;
   #unsubscribers = [];
   #aiCache = new Map();
@@ -75,11 +73,7 @@ export class Controller {
 
   /**
    * @param {object} options
-   * @param {ReadonlyArray<{ id: string, name: string, isHuman?: boolean }>} options.players
-   *   Players in clockwise seating order.
-   * @param {string} options.humanId
-   * @param {number | null} [options.seed] Deterministic seed for tests and demos.
-   * @param {number} [options.targetScore] Score required to win; 1000 by default.
+   * @param {object} options.session Session owning the game state.
    * @param {object} options.elements
    * @param {HTMLElement} options.elements.opponents
    * @param {HTMLElement} options.elements.humanPanel
@@ -94,11 +88,12 @@ export class Controller {
    * @param {HTMLElement | null} [options.elements.announcer]
    * @param {{ close: (options?: { restoreFocus?: boolean }) => void } | null} [options.elements.logDrawer]
    */
-  constructor({ players, humanId, seed = null, targetScore = TARGET_SCORE, elements }) {
-    this.#players = players.map((player) => Object.freeze({ ...player }));
-    this.#humanId = humanId;
-    this.#seed = seed === null || !Number.isFinite(seed) ? null : seed >>> 0;
-    this.#targetScore = targetScore;
+  constructor({ session, elements }) {
+    if (!session || typeof session.getState !== 'function') {
+      throw new TypeError('Controller requires a game session.');
+    }
+
+    this.#session = session;
     this.#elements = elements;
     this.#announcer = createAnnouncer(elements.announcer ?? null);
 
@@ -110,19 +105,37 @@ export class Controller {
   }
 
   /**
-   * Creates the first game and starts the first deal.
+   * Binds to the session and starts the first deal.
    *
    * @returns {void}
    */
   start() {
-    if (this.#started) {
+    if (this.#started || !this.#session) {
       return;
     }
 
     this.#started = true;
-    this.#game = this.#createGame();
-    this.#bindGame(this.#game);
-    this.#game.start();
+    this.#bindSession(this.#session);
+    this.#session.start();
+  }
+
+  /**
+   * Switches the controller to another session. All timers, modals and
+   * per-deal UI state are cleared before the new session starts.
+   *
+   * @param {object} session
+   * @returns {void}
+   */
+  replaceSession(session) {
+    this.#resetUiState();
+    this.#unsubscribeAll();
+    this.#session = session ?? null;
+    this.#aiCache.clear();
+
+    if (this.#session && this.#started) {
+      this.#bindSession(this.#session);
+      this.#session.start();
+    }
   }
 
   /**
@@ -132,27 +145,13 @@ export class Controller {
    * @returns {void}
    */
   newGame() {
-    this.#clearTimers();
-    this.#renderToken += 1;
-    this.#paused = false;
-    this.#aiBusy = false;
-    this.#trickReveal = null;
-    this.#bubbles.clear();
-    this.#marriageMenuOpen = false;
-    this.#lastPlayedCardId = null;
-    closeModal({ silent: true });
-    cancelAnimations(this.#elements.board, this.#elements.tableCenter);
-    this.#elements.logDrawer?.close({ restoreFocus: false });
-    this.#announcer?.reset();
-    resetLog(this.#elements.gameLog);
-    resetToasts();
+    if (!this.#session) {
+      return;
+    }
 
-    this.#unsubscribeAll();
-    this.#gameIndex += 1;
+    this.#resetUiState();
     this.#aiCache.clear();
-    this.#game = this.#createGame();
-    this.#bindGame(this.#game);
-    this.#game.start();
+    this.#session.restart();
   }
 
   /**
@@ -161,13 +160,13 @@ export class Controller {
    * @returns {void}
    */
   requestNewGame() {
-    if (!this.#game) {
+    if (!this.#session) {
       return;
     }
 
-    const state = this.#game.getState();
+    const state = this.#session.getState();
 
-    if (state.phase === PHASES.IDLE || state.dealNumber === 0) {
+    if (!state || state.phase === PHASES.IDLE || state.dealNumber === 0) {
       this.newGame();
       return;
     }
@@ -175,13 +174,13 @@ export class Controller {
     this.#paused = true;
     this.#clearAITimer();
     this.#clearTrickReveal();
-    this.#render(this.#game.getState());
+    this.#render(state);
 
     openConfirmNewGameModal({
       onConfirm: () => this.newGame(),
       onCancel: () => {
         this.#paused = false;
-        this.#syncModals(this.#game.getState());
+        this.#syncModals(this.#session.getState());
         this.#scheduleAI();
       },
     });
@@ -194,7 +193,7 @@ export class Controller {
    * @returns {void}
    */
   pause() {
-    if (!this.#game) {
+    if (!this.#session) {
       return;
     }
 
@@ -209,12 +208,12 @@ export class Controller {
    * @returns {void}
    */
   resume() {
-    if (!this.#game) {
+    if (!this.#session) {
       return;
     }
 
     this.#paused = false;
-    this.#syncModals(this.#game.getState());
+    this.#syncModals(this.#session.getState());
     this.#scheduleAI();
   }
 
@@ -235,56 +234,62 @@ export class Controller {
   }
 
   /**
-   * @returns {Game}
+   * Clears transient UI state shared by `newGame()` and `replaceSession()`.
+   *
+   * @returns {void}
    */
-  #createGame() {
-    const seed = this.#seed === null
-      ? null
-      : (this.#seed + this.#gameIndex * 104729) >>> 0;
-    const rng = seed === null ? Math.random : mulberry32(seed);
-
-    return new Game({
-      players: this.#players,
-      targetScore: this.#targetScore,
-      rng,
-    });
+  #resetUiState() {
+    this.#clearTimers();
+    this.#renderToken += 1;
+    this.#paused = false;
+    this.#aiBusy = false;
+    this.#trickReveal = null;
+    this.#bubbles.clear();
+    this.#marriageMenuOpen = false;
+    this.#lastPlayedCardId = null;
+    closeModal({ silent: true });
+    cancelAnimations(this.#elements.board, this.#elements.tableCenter);
+    this.#elements.logDrawer?.close({ restoreFocus: false });
+    this.#announcer?.reset();
+    resetLog(this.#elements.gameLog);
+    resetToasts();
   }
 
   /**
-   * Subscribes to every event needed by the interface.
+   * Subscribes to every session event needed by the interface.
    *
-   * @param {Game} game
+   * @param {object} session
    * @returns {void}
    */
-  #bindGame(game) {
+  #bindSession(session) {
     this.#unsubscribers = [
-      game.subscribe((state) => this.#handleStateChange(state)),
-      game.on(GAME_EVENTS.ERROR, (error) => this.#handleGameError(error)),
-      game.on(GAME_EVENTS.BID, (payload) => {
+      session.subscribe((state) => this.#handleStateChange(state)),
+      session.on(GAME_EVENTS.ERROR, (error) => this.#handleGameError(error)),
+      session.on(GAME_EVENTS.BID, (payload) => {
         this.#setBubble(payload.playerId, String(payload.amount));
         playSound('bid');
       }),
-      game.on(GAME_EVENTS.PASS, (payload) => {
+      session.on(GAME_EVENTS.PASS, (payload) => {
         this.#setBubble(payload.playerId, 'Пас');
         playSound('pass');
       }),
-      game.on(GAME_EVENTS.DEAL_STARTED, () => {
+      session.on(GAME_EVENTS.DEAL_STARTED, () => {
         this.#handleDealStarted();
         playSound('deal');
       }),
-      game.on(GAME_EVENTS.PRIKUP, (payload) => {
+      session.on(GAME_EVENTS.PRIKUP, (payload) => {
         this.#handlePrikup(payload);
         playSound('prikup');
       }),
-      game.on(GAME_EVENTS.GIFT, () => playSound('gift')),
-      game.on(GAME_EVENTS.MARRIAGE, () => playSound('marriage')),
-      game.on(GAME_EVENTS.CARD_PLAYED, (payload) => {
+      session.on(GAME_EVENTS.GIFT, () => playSound('gift')),
+      session.on(GAME_EVENTS.MARRIAGE, () => playSound('marriage')),
+      session.on(GAME_EVENTS.CARD_PLAYED, (payload) => {
         this.#lastPlayedCardId = payload.cardId;
         playSound('card');
       }),
-      game.on(GAME_EVENTS.TRICK_WON, (payload) => this.#handleTrickWon(payload)),
-      game.on(GAME_EVENTS.SCORED, () => playSound('score')),
-      game.on(GAME_EVENTS.GAME_OVER, () => playSound('win')),
+      session.on(GAME_EVENTS.TRICK_WON, (payload) => this.#handleTrickWon(payload)),
+      session.on(GAME_EVENTS.SCORED, () => playSound('score')),
+      session.on(GAME_EVENTS.GAME_OVER, () => playSound('win')),
     ];
 
     this.#aiCache.clear();
@@ -323,11 +328,11 @@ export class Controller {
    * @returns {void}
    */
   #setBubble(playerId, text) {
-    const player = this.#players.find((entry) => entry.id === playerId);
-
-    if (player && !player.isHuman) {
-      this.#bubbles.set(playerId, text);
+    if (typeof playerId !== 'string' || playerId === this.#session?.humanId) {
+      return;
     }
+
+    this.#bubbles.set(playerId, text);
   }
 
   /**
@@ -348,9 +353,15 @@ export class Controller {
    * @returns {void}
    */
   #handlePrikup(payload) {
-    const declarer = this.#players.find((player) => player.id === payload.declarerId);
+    const state = this.#session?.getState();
 
-    if (declarer && !declarer.isHuman) {
+    if (!state || payload.declarerId === this.#session.humanId) {
+      return;
+    }
+
+    const declarer = state.players.find((player) => player.id === payload.declarerId);
+
+    if (declarer) {
       showToast(`${declarer.name} забирает прикуп.`, 'info');
     }
   }
@@ -380,7 +391,7 @@ export class Controller {
       this.#trickRevealTimer = null;
       this.#trickReveal = null;
 
-      const state = this.#game.getState();
+      const state = this.#session.getState();
       this.#render(state);
       this.#syncModals(state);
       this.#scheduleAI();
@@ -404,6 +415,14 @@ export class Controller {
   }
 
   /**
+   * @param {object | null} state
+   * @returns {string | null}
+   */
+  #getViewerId(state) {
+    return resolveViewerId(state, this.#session?.humanId ?? null);
+  }
+
+  /**
    * @param {object} state
    * @returns {void}
    */
@@ -412,6 +431,7 @@ export class Controller {
     const displayState = reveal
       ? { ...state, currentTrick: reveal.cards, currentPlayerId: null }
       : state;
+    const viewerId = this.#getViewerId(state);
     const animatedCardId = this.#lastPlayedCardId;
     const focusSnapshot = captureFocus(this.#elements.board);
     const renderToken = ++this.#renderToken;
@@ -420,6 +440,7 @@ export class Controller {
     renderTable(displayState, this.#elements, {
       animatedCardId,
       winnerId: reveal ? reveal.winnerId : null,
+      viewerId,
     });
 
     if (reveal) {
@@ -435,11 +456,12 @@ export class Controller {
       applySpeechBubbles(this.#elements.opponents, this.#bubbles);
     }
 
-    const legalCardIds = this.#getHumanLegalCardIds(state, Boolean(reveal));
+    const legalCardIds = this.#getViewerLegalCardIds(state, viewerId, Boolean(reveal));
 
     renderHand(state, {
       handEl: this.#elements.hand,
-      playerId: this.#humanId,
+      viewerId,
+      playerId: viewerId,
       legalCardIds,
       onCardSelect: legalCardIds ? (card) => this.#humanPlayCard(card) : null,
       onIllegalCard: legalCardIds
@@ -478,7 +500,7 @@ export class Controller {
     }
 
     this.#announcer?.announce(getPhaseAnnouncement(state, {
-      humanId: this.#humanId,
+      humanId: viewerId,
       reveal: reveal ? { winnerId: reveal.winnerId, points: reveal.points } : null,
     }));
 
@@ -522,6 +544,7 @@ export class Controller {
    */
   #renderActionBar(state, revealActive) {
     const bar = this.#elements.actionBar;
+    const viewerId = this.#getViewerId(state);
 
     clearElement(bar);
 
@@ -541,7 +564,7 @@ export class Controller {
       case PHASES.BIDDING: {
         bar.append(createBiddingControls({
           state,
-          humanId: this.#humanId,
+          humanId: viewerId,
           onBid: (amount) => this.#humanBid(amount),
           onPass: () => this.#humanBid(null),
         }));
@@ -553,7 +576,7 @@ export class Controller {
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
           createElement('span', {
             className: 'action-bar__status',
-            text: declarer?.isHuman
+            text: declarer && declarer.id === viewerId
               ? 'Прикуп раскрыт — заберите три карты.'
               : `Прикуп раскрыт. ${declarer?.name ?? 'Играющий'} забирает карты.`,
           }),
@@ -562,12 +585,13 @@ export class Controller {
       }
       case PHASES.GIVING: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
-        const human = state.players.find((player) => player.id === this.#humanId);
+        const viewer = state.players.find((player) => player.id === viewerId);
+        const declarerIsSelf = Boolean(declarer && declarer.id === viewerId);
         let statusText;
 
         if (!state.raiseDecided) {
-          if (declarer?.isHuman) {
-            if (human && human.score < 0) {
+          if (declarerIsSelf) {
+            if (viewer && viewer.score < 0) {
               statusText = 'Повышение недоступно: отрицательный счёт.';
             } else if (state.contract >= BIDDING.MAX) {
               statusText = 'Заказ максимальный: повышать некуда.';
@@ -577,10 +601,14 @@ export class Controller {
           } else {
             statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
           }
+        } else if (declarerIsSelf) {
+          const opponents = state.players.filter((player) => player.id !== viewerId);
+          const names = formatGenitiveNames(opponents.map((player) => player.name));
+
+          statusText = `Заказ ${state.contract}. Выберите по одной карте для `
+            + `${names || 'соперников'} в окне отдара.`;
         } else {
-          statusText = declarer?.isHuman
-            ? `Заказ ${state.contract}. Выберите по одной карте для Алисы и Бориса в окне отдара.`
-            : `Заказ ${state.contract}. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`;
+          statusText = `Заказ ${state.contract}. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`;
         }
 
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
@@ -597,14 +625,13 @@ export class Controller {
 
         if (pending) {
           const owner = state.players.find((player) => player.id === pending.playerId);
+          const isSelf = pending.playerId === viewerId;
 
           group.append(createPendingMarriageStatus({
             suit: pending.suit,
             playerName: owner?.name ?? 'Игрок',
-            isHuman: pending.playerId === this.#humanId,
-            onCancel: pending.playerId === this.#humanId
-              ? () => this.#humanCancelMarriage()
-              : null,
+            isSelf,
+            onCancel: isSelf ? () => this.#humanCancelMarriage() : null,
           }));
 
           bar.append(group);
@@ -612,7 +639,7 @@ export class Controller {
         }
 
         const actor = state.players.find((player) => player.id === state.currentPlayerId);
-        const statusText = actor?.isHuman
+        const statusText = actor && actor.id === viewerId
           ? 'Ваш ход — выберите карту.'
           : (actor ? `Ход ${nameGenitive(actor.name)}…` : 'Розыгрыш…');
 
@@ -621,7 +648,7 @@ export class Controller {
           text: statusText,
         }));
 
-        const marriages = this.#getHumanMarriages(state);
+        const marriages = this.#getViewerMarriages(state, viewerId);
 
         if (marriages.length > 0) {
           if (this.#marriageMenuOpen) {
@@ -634,7 +661,7 @@ export class Controller {
               available: marriages,
               onOpen: () => {
                 this.#marriageMenuOpen = true;
-                this.#render(this.#game.getState());
+                this.#render(this.#session.getState());
               },
             }));
           }
@@ -669,25 +696,25 @@ export class Controller {
    * @param {boolean} revealActive
    * @returns {string[] | null}
    */
-  #getHumanLegalCardIds(state, revealActive) {
-    if (revealActive) {
+  #getViewerLegalCardIds(state, viewerId, revealActive) {
+    if (revealActive || viewerId === null) {
       return null;
     }
 
-    if (state.phase !== PHASES.PLAYING || state.currentPlayerId !== this.#humanId) {
+    if (state.phase !== PHASES.PLAYING || state.currentPlayerId !== viewerId) {
       return null;
     }
 
-    const human = state.players.find((player) => player.id === this.#humanId);
+    const viewer = state.players.find((player) => player.id === viewerId);
 
-    if (!human || human.hand.length === 0) {
+    if (!viewer || viewer.hand.length === 0) {
       return null;
     }
 
     const pending = state.pendingMarriage;
 
-    if (pending && pending.playerId === this.#humanId) {
-      return getMarriageConfirmationCards(human.hand, pending.suit)
+    if (pending && pending.playerId === viewerId) {
+      return getMarriageConfirmationCards(viewer.hand, pending.suit)
         .map((card) => card.id);
     }
 
@@ -697,7 +724,7 @@ export class Controller {
       leadSuit = getCardById(state.currentTrick[0].cardId).suit;
     }
 
-    return getLegalCards(human.hand, leadSuit, state.trumpSuit)
+    return getLegalCards(viewer.hand, leadSuit, state.trumpSuit)
       .map((card) => card.id);
   }
 
@@ -705,12 +732,12 @@ export class Controller {
    * @param {object} state
    * @returns {{ suit: string, value: number }[]}
    */
-  #getHumanMarriages(state) {
-    if (state.phase !== PHASES.PLAYING) {
+  #getViewerMarriages(state, viewerId) {
+    if (viewerId === null || state.phase !== PHASES.PLAYING) {
       return [];
     }
 
-    if (state.currentPlayerId !== this.#humanId) {
+    if (state.currentPlayerId !== viewerId) {
       return [];
     }
 
@@ -722,7 +749,7 @@ export class Controller {
       return [];
     }
 
-    if (this.#hasDeclaredMarriageThisTrick(state)) {
+    if (this.#hasDeclaredMarriageThisTrick(state, viewerId)) {
       return [];
     }
 
@@ -735,7 +762,7 @@ export class Controller {
    * @param {object} state
    * @returns {boolean}
    */
-  #hasDeclaredMarriageThisTrick(state) {
+  #hasDeclaredMarriageThisTrick(state, viewerId) {
     const log = Array.isArray(state.log) ? state.log : [];
 
     for (let index = log.length - 1; index >= 0; index -= 1) {
@@ -745,7 +772,7 @@ export class Controller {
         return false;
       }
 
-      if (entry.type === 'marriage' && entry.playerId === this.#humanId) {
+      if (entry.type === 'marriage' && entry.playerId === viewerId) {
         return true;
       }
     }
@@ -758,12 +785,12 @@ export class Controller {
    * @returns {void}
    */
   #humanBid(amount) {
-    if (this.#paused) {
+    if (this.#paused || !this.#session) {
       return;
     }
 
     try {
-      this.#game.bid(this.#humanId, amount);
+      this.#session.bid(this.#session.humanId, amount);
     } catch (error) {
       this.#reportUnexpected(error);
     }
@@ -774,12 +801,12 @@ export class Controller {
    * @returns {void}
    */
   #humanPlayCard(card) {
-    if (this.#paused || this.#trickReveal) {
+    if (this.#paused || this.#trickReveal || !this.#session) {
       return;
     }
 
     try {
-      this.#game.playCard(this.#humanId, card.id);
+      this.#session.playCard(this.#session.humanId, card.id);
     } catch (error) {
       this.#reportUnexpected(error);
     }
@@ -792,11 +819,15 @@ export class Controller {
   #humanDeclareMarriage(suit) {
     this.#marriageMenuOpen = false;
 
+    if (!this.#session) {
+      return;
+    }
+
     try {
-      this.#game.declareMarriage(this.#humanId, suit);
+      this.#session.declareMarriage(this.#session.humanId, suit);
     } catch (error) {
       this.#reportUnexpected(error);
-      this.#render(this.#game.getState());
+      this.#render(this.#session.getState());
     }
   }
 
@@ -806,11 +837,15 @@ export class Controller {
    * @returns {void}
    */
   #humanCancelMarriage() {
+    if (!this.#session) {
+      return;
+    }
+
     try {
-      this.#game.cancelMarriage(this.#humanId);
+      this.#session.cancelMarriage(this.#session.humanId);
     } catch (error) {
       this.#reportUnexpected(error);
-      this.#render(this.#game.getState());
+      this.#render(this.#session.getState());
     }
   }
 
@@ -822,13 +857,17 @@ export class Controller {
    * @returns {void}
    */
   #applyHumanGifts(gifts) {
+    if (!this.#session) {
+      return;
+    }
+
     try {
       for (const gift of gifts) {
-        this.#game.giveCard(gift.toPlayerId, gift.cardId);
+        this.#session.giveCard(gift.toPlayerId, gift.cardId);
       }
     } catch (error) {
       this.#reportUnexpected(error);
-      this.#render(this.#game.getState());
+      this.#render(this.#session.getState());
     }
   }
 
@@ -839,15 +878,15 @@ export class Controller {
    * @returns {void}
    */
   #resolveHumanRaise(amountOrNull) {
-    if (this.#paused) {
+    if (this.#paused || !this.#session) {
       return;
     }
 
     try {
-      this.#game.raiseContract(this.#humanId, amountOrNull);
+      this.#session.raiseContract(this.#session.humanId, amountOrNull);
     } catch (error) {
       this.#reportUnexpected(error);
-      this.#render(this.#game.getState());
+      this.#render(this.#session.getState());
     }
   }
 
@@ -890,9 +929,10 @@ export class Controller {
       return;
     }
 
+    const viewerId = this.#getViewerId(state);
     const kind = getOpenModalKind();
     const mandatoryModal = state.phase === PHASES.PRIKUP
-      || (state.phase === PHASES.GIVING && state.declarerId === this.#humanId)
+      || (state.phase === PHASES.GIVING && state.declarerId === viewerId)
       || state.phase === PHASES.DEAL_END
       || state.phase === PHASES.GAME_OVER;
 
@@ -905,6 +945,7 @@ export class Controller {
         closeModal({ silent: true });
         openPrikupRevealModal({
           state,
+          viewerId,
           onTakePrikup: () => this.#takePrikup(state.declarerId),
         });
       }
@@ -912,13 +953,13 @@ export class Controller {
       return;
     }
 
-    if (state.phase === PHASES.GIVING && state.declarerId === this.#humanId) {
+    if (state.phase === PHASES.GIVING && state.declarerId === viewerId) {
       if (!state.raiseDecided && state.givenCards.length === 0) {
         if (kind !== 'raise') {
           closeModal({ silent: true });
           openRaiseModal({
             state,
-            humanId: this.#humanId,
+            viewerId,
             onRaise: (amount) => this.#humanRaise(amount),
             onDecline: () => this.#humanDeclineRaise(),
           });
@@ -931,7 +972,7 @@ export class Controller {
         closeModal({ silent: true });
         openGiftModal({
           state,
-          humanId: this.#humanId,
+          viewerId,
           onConfirm: (gifts) => this.#applyHumanGifts(gifts),
         });
       }
@@ -945,7 +986,7 @@ export class Controller {
         openDealResultsModal(state, {
           onNextDeal: () => {
             closeModal();
-            this.#game.nextDeal();
+            this.#session.nextDeal();
           },
         });
       }
@@ -983,15 +1024,15 @@ export class Controller {
    * @returns {void}
    */
   #takePrikup(declarerId) {
-    if (!this.#game || typeof declarerId !== 'string') {
+    if (!this.#session || typeof declarerId !== 'string') {
       return;
     }
 
     try {
-      this.#game.takePrikup(declarerId);
+      this.#session.takePrikup(declarerId);
     } catch (error) {
       this.#reportUnexpected(error);
-      this.#render(this.#game.getState());
+      this.#render(this.#session.getState());
     }
   }
 
@@ -1007,12 +1048,17 @@ export class Controller {
       || this.#aiBusy
       || this.#aiTimer !== null
       || this.#trickReveal
-      || !this.#game
+      || !this.#session
     ) {
       return;
     }
 
-    const state = this.#game.getState();
+    const state = this.#session.getState();
+
+    if (!state) {
+      return;
+    }
+
     const actor = state.currentPlayerId
       ? state.players.find((player) => player.id === state.currentPlayerId)
       : null;
@@ -1022,7 +1068,7 @@ export class Controller {
       || state.phase === PHASES.GIVING
       || state.phase === PHASES.PLAYING;
 
-    if (!actor || actor.isHuman || !playablePhase) {
+    if (!actor || !actor.isAI || !playablePhase) {
       return;
     }
 
@@ -1040,19 +1086,19 @@ export class Controller {
    * @returns {void}
    */
   #runAI() {
-    if (this.#paused || this.#aiBusy || this.#trickReveal || !this.#game) {
+    if (this.#paused || this.#aiBusy || this.#trickReveal || !this.#session) {
       return;
     }
 
     this.#aiBusy = true;
 
     try {
-      const state = this.#game.getState();
-      const actor = state.currentPlayerId
+      const state = this.#session.getState();
+      const actor = state?.currentPlayerId
         ? state.players.find((player) => player.id === state.currentPlayerId)
         : null;
 
-      if (!actor || actor.isHuman) {
+      if (!state || !actor || !actor.isAI) {
         return;
       }
 
@@ -1066,7 +1112,7 @@ export class Controller {
             break;
           }
 
-          const view = this.#game.getPlayerView(actor.id);
+          const view = this.#session.getPlayerView(actor.id);
           let amount = null;
 
           try {
@@ -1079,14 +1125,14 @@ export class Controller {
             amount = getFallbackBid(state);
           }
 
-          this.#game.bid(actor.id, amount);
+          this.#session.bid(actor.id, amount);
           break;
         }
         case PHASES.PRIKUP:
           // The controller takes the revealed prikup from the mandatory modal.
           break;
         case PHASES.GIVING: {
-          const view = this.#game.getPlayerView(actor.id);
+          const view = this.#session.getPlayerView(actor.id);
 
           if (!state.raiseDecided && state.givenCards.length === 0) {
             let amount = null;
@@ -1103,7 +1149,7 @@ export class Controller {
               amount = null;
             }
 
-            this.#game.raiseContract(actor.id, amount);
+            this.#session.raiseContract(actor.id, amount);
             break;
           }
 
@@ -1124,11 +1170,11 @@ export class Controller {
             throw new Error('Нет карты для отдара.');
           }
 
-          this.#game.giveCard(gift.toPlayerId, gift.cardId);
+          this.#session.giveCard(gift.toPlayerId, gift.cardId);
           break;
         }
         case PHASES.PLAYING: {
-          const view = this.#game.getPlayerView(actor.id);
+          const view = this.#session.getPlayerView(actor.id);
 
           if (
             !state.pendingMarriage
@@ -1144,12 +1190,12 @@ export class Controller {
             }
 
             if (suit) {
-              this.#game.declareMarriage(actor.id, suit);
+              this.#session.declareMarriage(actor.id, suit);
               break;
             }
           }
 
-          const legalCards = this.#getLegalCardList(state, actor.id);
+          const legalCards = this.#getLegalCardList(view, actor.id);
           let card = null;
 
           try {
@@ -1166,7 +1212,7 @@ export class Controller {
             throw new Error('Нет легальной карты для хода.');
           }
 
-          this.#game.playCard(actor.id, card.id);
+          this.#session.playCard(actor.id, card.id);
           break;
         }
         default:
@@ -1181,24 +1227,25 @@ export class Controller {
   }
 
   /**
-   * Returns the cards that the acting AI may legally play.
+   * Returns the cards that the acting AI may legally play. The list is always
+   * derived from that AI's own player view, never from the viewer snapshot.
    *
-   * @param {object} state
+   * @param {object} view AI player view with its own hand.
    * @param {string} playerId
    * @returns {import('../core/deck.js').Card[]}
    */
-  #getLegalCardList(state, playerId) {
-    const player = state.players.find((entry) => entry.id === playerId);
+  #getLegalCardList(view, playerId) {
+    const player = view.players.find((entry) => entry.id === playerId);
 
     if (!player || player.hand.length === 0) {
       return [];
     }
 
-    const leadSuit = state.currentTrick.length > 0
-      ? getCardById(state.currentTrick[0].cardId).suit
+    const leadSuit = view.currentTrick.length > 0
+      ? getCardById(view.currentTrick[0].cardId).suit
       : null;
-    const legal = getLegalCards(player.hand, leadSuit, state.trumpSuit);
-    const pending = state.pendingMarriage;
+    const legal = getLegalCards(player.hand, leadSuit, view.trumpSuit);
+    const pending = view.pendingMarriage;
 
     if (pending && pending.playerId === playerId) {
       const confirmationIds = new Set(
@@ -1225,9 +1272,7 @@ export class Controller {
       return cached;
     }
 
-    const rng = this.#seed === null
-      ? Math.random
-      : mulberry32((this.#seed + this.#gameIndex * 104729 + hashString(playerId)) >>> 0);
+    const rng = this.#session.createAIRng(playerId);
     const ai = createAI({ playerId, rng });
 
     this.#aiCache.set(playerId, ai);
@@ -1369,19 +1414,4 @@ function getFallbackGift(view, playerId) {
   const cardId = self.hand.find((id) => !givenCards.has(id));
 
   return cardId ? { toPlayerId: target.id, cardId } : null;
-}
-
-/**
- * @param {string} value
- * @returns {number}
- */
-function hashString(value) {
-  let hash = 2166136261;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return hash >>> 0;
 }

@@ -129,10 +129,14 @@ test('state snapshots are frozen copies and player views hide private data', () 
   });
   const state = game.getState();
 
+  assert.equal(state.viewerId, null);
   assert.equal(Object.isFrozen(state), true);
   assert.equal(Object.isFrozen(state.players), true);
   assert.equal(Object.isFrozen(state.players[0]), true);
   assert.equal(Object.isFrozen(state.players[0].hand), true);
+  assert.equal(getStatePlayer(state, 'human').isAI, false);
+  assert.equal(getStatePlayer(state, 'alice').isAI, true);
+  assert.equal(getStatePlayer(state, 'boris').isAI, true);
   assert.throws(() => {
     state.players[0].hand.push('X9');
   }, TypeError);
@@ -152,6 +156,10 @@ test('state snapshots are frozen copies and player views hide private data', () 
   const humanView = game.getPlayerView('human');
 
   assert.equal(humanView.phase, PHASES.BIDDING);
+  assert.equal(humanView.viewerId, 'human');
+  assert.equal(getStatePlayer(humanView, 'human').isAI, false);
+  assert.equal(getStatePlayer(humanView, 'alice').isAI, true);
+  assert.equal(getStatePlayer(humanView, 'boris').isAI, true);
   assert.equal(humanView.prikup.length, 0);
   assert.equal(humanView.prikupRevealed, false);
   assert.equal(humanView.prikupTaken, false);
