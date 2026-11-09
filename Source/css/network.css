@@ -1,0 +1,239 @@
+/* Network lobby and room UI */
+
+.modal--network .modal__body {
+  min-width: 0;
+}
+
+.network-lobby {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.network-hint,
+.network-instruction,
+.network-status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.network-instruction {
+  padding: 12px 14px;
+  border: 1px solid rgba(240, 145, 134, 0.42);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: rgba(240, 145, 134, 0.1);
+}
+
+.network-status {
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 239, 227, 0.14);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.network-status--waiting {
+  border-color: rgba(229, 185, 92, 0.38);
+  color: var(--color-gold-bright);
+  background: rgba(229, 185, 92, 0.08);
+}
+
+.network-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.network-label {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.network-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 239, 227, 0.24);
+  border-radius: 10px;
+  color: var(--color-text);
+  font: inherit;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.network-input:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.network-input--code {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.network-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.network-actions .button {
+  max-width: 100%;
+}
+
+.network-divider {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--color-text-faint);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.network-divider::before,
+.network-divider::after {
+  flex: 1;
+  height: 1px;
+  background: rgba(245, 239, 227, 0.12);
+  content: "";
+}
+
+.network-room-code {
+  padding: 8px 14px;
+  border: 1px solid rgba(229, 185, 92, 0.42);
+  border-radius: var(--radius-md);
+  color: var(--color-gold-bright);
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  line-height: 1.1;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.24);
+  box-shadow: inset 0 0 22px rgba(229, 185, 92, 0.08);
+}
+
+.network-invite {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.network-invite__input {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.network-seats__title {
+  margin: 4px 0 0;
+  color: var(--color-gold-bright);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+}
+
+.network-seats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.network-seat {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 239, 227, 0.12);
+  border-radius: var(--radius-md);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(4, 20, 14, 0.3));
+}
+
+.network-seat--ai {
+  border-style: dashed;
+  opacity: 0.82;
+}
+
+.network-seat--offline {
+  border-color: rgba(240, 145, 134, 0.34);
+}
+
+.network-seat__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+}
+
+.network-seat__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.network-seat__kick {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 640px) {
+  .network-lobby {
+    gap: 12px;
+  }
+
+  .network-room-code {
+    letter-spacing: 0.2em;
+  }
+
+  .network-actions .button {
+    flex: 1 1 160px;
+  }
+
+  .network-invite .button {
+    flex: 1 1 100%;
+  }
+
+  .network-seat__kick {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .network-room-code {
+    font-size: 1.5rem;
+    letter-spacing: 0.14em;
+  }
+
+  .network-actions {
+    flex-direction: column;
+  }
+
+  .network-actions .button {
+    width: 100%;
+  }
+}

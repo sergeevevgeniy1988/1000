@@ -135,6 +135,15 @@ export class Controller {
     if (this.#session && this.#started) {
       this.#bindSession(this.#session);
       this.#session.start();
+
+      // A local session returns its current snapshot synchronously, and a
+      // network session may already hold its first view. Render it so a switch
+      // never leaves an empty table behind.
+      const state = this.#session.getState?.();
+
+      if (state) {
+        this.#handleStateChange(state);
+      }
     }
   }
 
@@ -146,6 +155,11 @@ export class Controller {
    */
   newGame() {
     if (!this.#session) {
+      return;
+    }
+
+    if (this.#session.capabilities?.canRestart === false) {
+      showToast('Новую игру может начать только хост.', 'info');
       return;
     }
 
@@ -161,6 +175,11 @@ export class Controller {
    */
   requestNewGame() {
     if (!this.#session) {
+      return;
+    }
+
+    if (this.#session.capabilities?.canRestart === false) {
+      showToast('Новую игру может начать только хост.', 'info');
       return;
     }
 
@@ -293,6 +312,10 @@ export class Controller {
     ];
 
     this.#aiCache.clear();
+
+    if (this.#elements.newGameButton) {
+      this.#elements.newGameButton.disabled = session.capabilities?.canRestart === false;
+    }
   }
 
   /**
@@ -1049,6 +1072,7 @@ export class Controller {
       || this.#aiTimer !== null
       || this.#trickReveal
       || !this.#session
+      || this.#session.capabilities?.controlsAI === false
     ) {
       return;
     }
@@ -1086,7 +1110,13 @@ export class Controller {
    * @returns {void}
    */
   #runAI() {
-    if (this.#paused || this.#aiBusy || this.#trickReveal || !this.#session) {
+    if (
+      this.#paused
+      || this.#aiBusy
+      || this.#trickReveal
+      || !this.#session
+      || this.#session.capabilities?.controlsAI === false
+    ) {
       return;
     }
 
