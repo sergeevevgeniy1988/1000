@@ -446,6 +446,65 @@ export class Controller {
   }
 
   /**
+   * Returns the waiting text when the acting seat is a live player whose
+   * connection dropped. AI seats never produce this text because the host
+   * never substitutes AI for a disconnected person.
+   *
+   * @param {string | null} playerId
+   * @returns {string | null}
+   */
+  #getOfflineWaitText(playerId) {
+    if (!this.#session || typeof playerId !== 'string') {
+      return null;
+    }
+
+    if (typeof this.#session.getSeatStatus !== 'function') {
+      return null;
+    }
+
+    if (this.#session.getSeatStatus(playerId) !== 'нет связи') {
+      return null;
+    }
+
+    const player = this.#session.getState()?.players.find((entry) => entry.id === playerId);
+
+    return `Ждём ${player?.name ?? 'игрока'} — нет связи.`;
+  }
+
+  /**
+   * Shows host-side presence during the game. The lobby modal covers the
+   * pre-game presence; this indicator keeps offline guests visible at the
+   * table without changing the game state.
+   *
+   * @returns {void}
+   */
+  #renderPresence() {
+    const session = this.#session;
+
+    if (
+      !session
+      || session.capabilities?.isHost !== true
+      || typeof session.getPresence !== 'function'
+    ) {
+      return;
+    }
+
+    const offline = session.getPresence()
+      .filter((seat) => seat.occupied === true && seat.connected !== true);
+
+    if (offline.length === 0) {
+      return;
+    }
+
+    this.#elements.actionBar.append(createElement('div', { className: 'action-bar__group' }, ...[
+      createElement('span', {
+        className: 'action-bar__status action-bar__status--offline',
+        text: `Нет связи: ${offline.map((seat) => seat.name).join(', ')}.`,
+      }),
+    ]));
+  }
+
+  /**
    * @param {object} state
    * @returns {void}
    */
@@ -494,6 +553,7 @@ export class Controller {
     renderLog(state, this.#elements.gameLog);
     this.#renderHeader(state);
     this.#renderActionBar(state, reveal);
+    this.#renderPresence();
 
     if (focusSnapshot && !restoreFocus(this.#elements.board, focusSnapshot)) {
       this.#applyFocusFallback();
@@ -591,17 +651,41 @@ export class Controller {
           onBid: (amount) => this.#humanBid(amount),
           onPass: () => this.#humanBid(null),
         }));
+
+        const bidder = state.players.find((player) => player.id === state.currentBidderId);
+        const offlineText = bidder && bidder.id !== viewerId
+          ? this.#getOfflineWaitText(bidder.id)
+          : null;
+
+        if (offlineText) {
+          bar.append(createElement('div', { className: 'action-bar__group' }, ...[
+            createElement('span', {
+              className: 'action-bar__status action-bar__status--offline',
+              text: offlineText,
+            }),
+          ]));
+        }
+
         break;
       }
       case PHASES.PRIKUP: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
+        let statusText = declarer && declarer.id === viewerId
+          ? 'Прикуп раскрыт — заберите три карты.'
+          : `Прикуп раскрыт. ${declarer?.name ?? 'Играющий'} забирает карты.`;
+
+        if (declarer && declarer.id !== viewerId) {
+          const offlineText = this.#getOfflineWaitText(declarer.id);
+
+          if (offlineText) {
+            statusText = offlineText;
+          }
+        }
 
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
           createElement('span', {
             className: 'action-bar__status',
-            text: declarer && declarer.id === viewerId
-              ? 'Прикуп раскрыт — заберите три карты.'
-              : `Прикуп раскрыт. ${declarer?.name ?? 'Играющий'} забирает карты.`,
+            text: statusText,
           }),
         ]));
         break;
@@ -634,6 +718,14 @@ export class Controller {
           statusText = `Заказ ${state.contract}. ${declarer?.name ?? 'Играющий'} отдаёт карты соперникам…`;
         }
 
+        if (!declarerIsSelf) {
+          const offlineText = this.#getOfflineWaitText(declarer?.id ?? null);
+
+          if (offlineText) {
+            statusText = offlineText;
+          }
+        }
+
         bar.append(createElement('div', { className: 'action-bar__group' }, ...[
           createElement('span', {
             className: 'action-bar__status',
@@ -662,9 +754,17 @@ export class Controller {
         }
 
         const actor = state.players.find((player) => player.id === state.currentPlayerId);
-        const statusText = actor && actor.id === viewerId
+        let statusText = actor && actor.id === viewerId
           ? 'Ваш ход — выберите карту.'
           : (actor ? `Ход ${nameGenitive(actor.name)}…` : 'Розыгрыш…');
+
+        if (actor && actor.id !== viewerId) {
+          const offlineText = this.#getOfflineWaitText(actor.id);
+
+          if (offlineText) {
+            statusText = offlineText;
+          }
+        }
 
         group.append(createElement('span', {
           className: 'action-bar__status',

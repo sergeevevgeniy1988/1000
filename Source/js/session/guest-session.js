@@ -1,4 +1,5 @@
 import { GAME_EVENTS } from '../core/constants.js';
+import { GameError } from '../core/errors.js';
 import { EventEmitter } from '../core/events.js';
 import { normalizeLobby } from '../net/lobby.js';
 import { POLL_INTERVAL_MS, validateName } from '../net/protocol.js';
@@ -22,8 +23,11 @@ export class GuestSession {
   #lobby = normalizeLobby(null);
   #view = null;
   #viewVersion = 0;
+  #log = [];
+  #logSince = 0;
   #logEpoch = 0;
   #logTotal = 0;
+  #messages = [];
   #messageTotal = 0;
   #started = false;
   #running = false;
@@ -116,6 +120,16 @@ export class GuestSession {
     return this.#view;
   }
 
+  /** @returns {ReadonlyArray<object>} Merged public-log entries. */
+  get log() {
+    return this.#log;
+  }
+
+  /** @returns {ReadonlyArray<object>} Targeted messages addressed to this seat. */
+  get messages() {
+    return this.#messages;
+  }
+
   /**
    * @param {string} playerId
    * @returns {object}
@@ -173,7 +187,7 @@ export class GuestSession {
 
     const state = await this.#relay.playerPoll(this.#roomCode, this.#token, {
       viewSince: this.#viewVersion,
-      logSince: 0,
+      logSince: this.#logSince,
       logEpoch: this.#logEpoch,
       messageSince: this.#messageTotal,
     });
@@ -243,17 +257,8 @@ export class GuestSession {
       this.#viewVersion = state.viewVersion;
     }
 
-    if (Number.isFinite(state?.logEpoch)) {
-      this.#logEpoch = state.logEpoch;
-    }
-
-    if (Number.isFinite(state?.logTotal)) {
-      this.#logTotal = state.logTotal;
-    }
-
-    if (Number.isFinite(state?.messageTotal)) {
-      this.#messageTotal = state.messageTotal;
-    }
+    this.#applyLog(state);
+    this.#applyMessages(state);
 
     if (state?.view) {
       if (state.view.viewerId !== this.#playerId) {
@@ -262,6 +267,84 @@ export class GuestSession {
 
       this.#view = state.view;
       this.#emitter.emit(GAME_EVENTS.STATE_CHANGE, this.#view);
+    }
+  }
+
+  /**
+   * Merges public-log deltas. A changed epoch means the host reset the log
+   * (new game or a resync), so stale local entries are dropped first.
+   *
+   * @param {object} state
+   * @returns {void}
+   */
+  #applyLog(state) {
+    const nextEpoch = Number.isFinite(state?.logEpoch) ? state.logEpoch : this.#logEpoch;
+
+    if (nextEpoch !== this.#logEpoch) {
+      this.#logEpoch = nextEpoch;
+      this.#log = [];
+      this.#logSince = 0;
+    }
+
+    const entries = Array.isArray(state?.log) ? state.log : [];
+    const appended = [];
+
+    for (const item of entries) {
+      if (!item || !Number.isFinite(item.seq) || item.seq <= this.#logSince) {
+        continue;
+      }
+
+      appended.push(item.entry);
+      this.#log.push(item.entry);
+      this.#logSince = Math.max(this.#logSince, item.seq);
+    }
+
+    if (Number.isFinite(state?.logTotal)) {
+      this.#logTotal = state.logTotal;
+    }
+
+    if (appended.length > 0) {
+      this.#emitter.emit('log', appended);
+    }
+  }
+
+  /**
+   * Applies targeted messages addressed to this seat. Error payloads are also
+   * surfaced through the regular `error` event so the existing toast helper
+   * can show them.
+   *
+   * @param {object} state
+   * @returns {void}
+   */
+  #applyMessages(state) {
+    const messages = Array.isArray(state?.messages) ? state.messages : [];
+    const appended = [];
+
+    for (const item of messages) {
+      if (!item || !Number.isFinite(item.seq) || item.seq <= this.#messageTotal) {
+        continue;
+      }
+
+      appended.push(item.payload);
+      this.#messageTotal = Math.max(this.#messageTotal, item.seq);
+    }
+
+    if (Number.isFinite(state?.messageTotal)) {
+      this.#messageTotal = Math.max(this.#messageTotal, state.messageTotal);
+    }
+
+    for (const payload of appended) {
+      this.#messages.push(payload);
+      this.#emitter.emit('message', payload);
+
+      if (payload && typeof payload === 'object' && typeof payload.code === 'string') {
+        this.#emitter.emit(GAME_EVENTS.ERROR, new GameError(
+          payload.code,
+          typeof payload.message === 'string' && payload.message.length > 0
+            ? payload.message
+            : 'Не удалось выполнить действие.',
+        ));
+      }
     }
   }
 

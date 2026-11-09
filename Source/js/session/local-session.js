@@ -1,4 +1,5 @@
 import { GAME_EVENTS, TARGET_SCORE } from '../core/constants.js';
+import { GameError } from '../core/errors.js';
 import { EventEmitter } from '../core/events.js';
 import { Game } from '../core/game.js';
 import { mulberry32 } from '../core/rng.js';
@@ -142,6 +143,20 @@ export class LocalSession {
   }
 
   /**
+   * Returns the public game log. The log never contains hidden cards and is
+   * the same for every player; the host publishes it as deltas.
+   *
+   * @returns {ReadonlyArray<object>}
+   */
+  getLog() {
+    if (!this.#game) {
+      return [];
+    }
+
+    return this.#game.getPlayerView(this.#humanId).log;
+  }
+
+  /**
    * Adds a state listener. Supports `subscribe(listener)` and
    * `subscribe(eventName, listener)`.
    *
@@ -268,6 +283,32 @@ export class LocalSession {
    */
   giveCard(toPlayerId, cardId) {
     return this.#run((game) => game.giveCard(toPlayerId, cardId));
+  }
+
+  /**
+   * Gives a card on behalf of an explicit acting player. `Game#giveCard` does
+   * not accept an actor id, so the network host must verify that the action
+   * author really is the declarer before applying it.
+   *
+   * @param {string} playerId Author of the action, must be the declarer.
+   * @param {string} toPlayerId
+   * @param {string} cardId
+   * @returns {object | null}
+   */
+  giveCardAs(playerId, toPlayerId, cardId) {
+    return this.#run((game) => {
+      const state = game.getState();
+
+      if (state.declarerId !== playerId) {
+        throw new GameError(
+          'NOT_DECLARER',
+          'Только играющий может отдать карту.',
+          { playerId, declarerId: state.declarerId },
+        );
+      }
+
+      game.giveCard(toPlayerId, cardId);
+    });
   }
 
   /**

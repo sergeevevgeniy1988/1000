@@ -29,6 +29,19 @@ export const REQUEST_TIMEOUT_MS = 8000;
 export const RETRY_ATTEMPTS = 3;
 export const RETRY_BASE_DELAY_MS = 300;
 
+/**
+ * Host-side limits. The host polls the action queue at the same cadence as a
+ * guest polls the player endpoint; the relay itself also caps the queue at 100.
+ */
+export const HOST_ACTION_POLL_INTERVAL_MS = POLL_INTERVAL_MS;
+export const HOST_ACTION_BATCH_LIMIT = 50;
+export const HOST_ACTION_DEDUPE_LIMIT = 100;
+export const HOST_EVENT_BUFFER_LIMIT = 500;
+export const HOST_VIEW_MAX_BYTES = 16 * 1024;
+export const HOST_PUBLISH_RETRY_ATTEMPTS = 3;
+export const HOST_PUBLISH_RETRY_DELAY_MS = 1000;
+export const HOST_PUBLISH_COALESCE_MS = 50;
+
 /** Stable action type names understood by the host and the relay. */
 export const ACTION_TYPES = Object.freeze({
   BID: 'bid',
@@ -344,6 +357,57 @@ export function validateAction(type, payload = {}) {
     default:
       return { ok: true, type, payload: {} };
   }
+}
+
+/**
+ * Validates the server wrapper around one queued action. The host trusts the
+ * wrapper's `playerId` (the relay derives it from the token) and validates the
+ * action payload with the same rules as the client.
+ *
+ * @param {unknown} action
+ * @returns {ValidationResult & { playerId?: string, actionId?: string, type?: string, payload?: Record<string, unknown>, seq?: number }}
+ */
+export function validateActionEnvelope(action) {
+  if (!action || typeof action !== 'object' || Array.isArray(action)) {
+    return invalid('bad_action', 'Некорректное действие.');
+  }
+
+  if (!isValidSeatId(action.playerId)) {
+    return invalid('bad_player', 'Неизвестное место автора действия.');
+  }
+
+  if (!isValidActionId(action.actionId)) {
+    return invalid('bad_action', 'Некорректный идентификатор действия.');
+  }
+
+  if (!Number.isInteger(action.seq) || action.seq < 1) {
+    return invalid('bad_action', 'Некорректный номер действия в очереди.');
+  }
+
+  const validation = validateAction(action.type, action.payload ?? {});
+
+  if (!validation.ok) {
+    return validation;
+  }
+
+  return {
+    ok: true,
+    playerId: action.playerId,
+    actionId: action.actionId,
+    type: validation.type,
+    payload: validation.payload,
+    seq: action.seq,
+  };
+}
+
+/**
+ * User-facing text for a live seat that lost its connection.
+ *
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function formatOfflineWait(name) {
+  return `Ждём ${typeof name === 'string' && name.length > 0 ? name : 'игрока'} — нет связи.`;
 }
 
 /**
