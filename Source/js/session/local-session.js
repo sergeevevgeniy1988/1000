@@ -51,6 +51,11 @@ export class LocalSession {
     this.#targetScore = targetScore;
   }
 
+  /** @returns {Readonly<{ mode: 'local', controlsAI: true, canRestart: true, isHost: true }>} */
+  get capabilities() {
+    return LocalSession.CAPABILITIES;
+  }
+
   /** @returns {string} */
   get humanId() {
     return this.#humanId;
@@ -463,6 +468,13 @@ export class LocalSession {
     this.#gameUnsubscribers.clear();
   }
 }
+
+LocalSession.CAPABILITIES = Object.freeze({
+  mode: 'local',
+  controlsAI: true,
+  canRestart: true,
+  isHost: true,
+});
 
 /**
  * @param {string} value

@@ -18,6 +18,31 @@ function findPlayer(state, playerId) {
 }
 
 /**
+ * Returns a waiting message when the seat that must act lost its connection.
+ * AI seats never match because presence only lists occupied seats.
+ *
+ * @param {object} state
+ * @param {string | null} playerId
+ * @param {string | null} viewerId
+ * @returns {string | null}
+ */
+function getOfflineWait(state, playerId, viewerId) {
+  if (!playerId || playerId === viewerId || !Array.isArray(state?.network?.presence)) {
+    return null;
+  }
+
+  const seat = state.network.presence.find((entry) => entry?.playerId === playerId);
+
+  if (!seat || seat.occupied !== true || seat.connected === true) {
+    return null;
+  }
+
+  const player = findPlayer(state, playerId);
+
+  return `Ждём ${player?.name ?? seat.name ?? 'игрока'} — нет связи.`;
+}
+
+/**
  * Builds a short Russian sentence for the persistent aria-live region. It
  * describes the phase and whose turn it is without exposing hidden data.
  *
@@ -40,6 +65,17 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
   const trump = state.trumpSuit
     ? ` Козырь — ${getSuitNameLower(state.trumpSuit)}.`
     : ' Козырь не объявлен.';
+
+  const waitingForActor = getOfflineWait(state, actor?.id ?? null, viewerId);
+  const waitingForDeclarer = getOfflineWait(state, declarer?.id ?? null, viewerId);
+
+  if (waitingForActor && (state.phase === PHASES.BIDDING || state.phase === PHASES.PLAYING)) {
+    return waitingForActor;
+  }
+
+  if (waitingForDeclarer && (state.phase === PHASES.PRIKUP || state.phase === PHASES.GIVING)) {
+    return waitingForDeclarer;
+  }
 
   switch (state.phase) {
     case PHASES.IDLE:

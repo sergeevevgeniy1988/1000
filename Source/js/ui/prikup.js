@@ -6,6 +6,30 @@ import { openModal } from './modals.js';
 import { getRaiseOptions } from './raise.js';
 
 /**
+ * Decides who may take the revealed prikup. The declarer always may; a host
+ * also takes it for an AI declarer, while a guest waits for the live declarer.
+ *
+ * @param {object} options
+ * @param {string | null} [options.declarerId]
+ * @param {string | null} [options.viewerId]
+ * @param {boolean} [options.declarerIsAI]
+ * @param {boolean} [options.isHost]
+ * @returns {boolean}
+ */
+export function canViewerTakePrikup({
+  declarerId = null,
+  viewerId = null,
+  declarerIsAI = false,
+  isHost = false,
+} = {}) {
+  if (declarerId === null) {
+    return false;
+  }
+
+  return declarerId === viewerId || (declarerIsAI === true && isHost === true);
+}
+
+/**
  * Opens the mandatory public prikup reveal modal. The three cards are visible
  * to every player and stay out of the declarer's hand until the action button
  * is pressed.
@@ -13,10 +37,16 @@ import { getRaiseOptions } from './raise.js';
  * @param {object} options
  * @param {object} options.state Player view snapshot.
  * @param {string | null} [options.viewerId] Seat the UI shows.
+ * @param {boolean} [options.isHost] Whether this client controls AI seats.
  * @param {() => void} options.onTakePrikup Called when the prikup is taken.
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openPrikupRevealModal({ state, viewerId = null, onTakePrikup }) {
+export function openPrikupRevealModal({
+  state,
+  viewerId = null,
+  isHost = false,
+  onTakePrikup,
+}) {
   const declarer = state.players.find((player) => player.id === state.declarerId);
   const resolvedViewerId = viewerId ?? resolveViewerId(state);
 
@@ -25,6 +55,12 @@ export function openPrikupRevealModal({ state, viewerId = null, onTakePrikup }) 
   }
 
   const isDeclarerSelf = declarer.id === resolvedViewerId;
+  const canTakePrikup = canViewerTakePrikup({
+    declarerId: declarer.id,
+    viewerId: resolvedViewerId,
+    declarerIsAI: declarer.isAI === true,
+    isHost: isHost === true,
+  });
   const body = createElement('div', { className: 'prikup' });
   const intro = createElement('p', {
     className: 'prikup__intro',
@@ -53,8 +89,22 @@ export function openPrikupRevealModal({ state, viewerId = null, onTakePrikup }) 
 
   footer.append(createElement('p', {
     className: 'prikup__footer-hint',
-    text: 'Карты прикупа видны всем игрокам.',
+    text: canTakePrikup
+      ? 'Карты прикупа видны всем игрокам.'
+      : `Ждём ${declarer.name} — ${declarer.name} забирает прикуп.`,
   }));
+
+  const actions = [];
+
+  if (canTakePrikup) {
+    actions.push({
+      label: isDeclarerSelf ? 'Забрать прикуп' : 'Продолжить',
+      onClick: () => onTakePrikup?.(),
+      variant: 'primary',
+      action: 'take-prikup',
+      autofocus: true,
+    });
+  }
 
   return openModal({
     kind: 'prikup-reveal',
@@ -62,13 +112,7 @@ export function openPrikupRevealModal({ state, viewerId = null, onTakePrikup }) 
     subtitle: 'Три карты раскрыты всем игрокам',
     body,
     footer,
-    actions: [{
-      label: isDeclarerSelf ? 'Забрать прикуп' : 'Продолжить',
-      onClick: () => onTakePrikup?.(),
-      variant: 'primary',
-      action: 'take-prikup',
-      autofocus: true,
-    }],
+    actions,
     dismissible: false,
     className: 'modal--prikup',
   });

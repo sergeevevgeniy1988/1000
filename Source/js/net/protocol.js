@@ -30,6 +30,15 @@ export const RETRY_ATTEMPTS = 3;
 export const RETRY_BASE_DELAY_MS = 300;
 
 /**
+ * Guest-side timing. Actions are queued over HTTP and the host confirms them
+ * with the next state change; polls back off while the relay is unreachable.
+ */
+export const GUEST_ACTION_TIMEOUT_MS = REQUEST_TIMEOUT_MS;
+export const GUEST_ACTION_RETRY_ATTEMPTS = RETRY_ATTEMPTS;
+export const GUEST_RECONNECT_BASE_DELAY_MS = RETRY_BASE_DELAY_MS;
+export const GUEST_RECONNECT_MAX_DELAY_MS = 5000;
+
+/**
  * Host-side limits. The host polls the action queue at the same cadence as a
  * guest polls the player endpoint; the relay itself also caps the queue at 100.
  */
@@ -408,6 +417,26 @@ export function validateActionEnvelope(action) {
  */
 export function formatOfflineWait(name) {
   return `Ждём ${typeof name === 'string' && name.length > 0 ? name : 'игрока'} — нет связи.`;
+}
+
+/**
+ * Exponential backoff used by the guest poll loop after a network failure.
+ * The first failure waits one base delay, then the delay doubles up to a cap.
+ *
+ * @param {number} [attempt] Zero-based failure index.
+ * @param {object} [options]
+ * @param {number} [options.base]
+ * @param {number} [options.max]
+ * @returns {number}
+ */
+export function getReconnectDelay(attempt = 0, {
+  base = GUEST_RECONNECT_BASE_DELAY_MS,
+  max = GUEST_RECONNECT_MAX_DELAY_MS,
+} = {}) {
+  const index = Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : 0;
+  const delay = base * (2 ** index);
+
+  return Math.min(Math.max(0, max), Math.max(0, delay));
 }
 
 /**

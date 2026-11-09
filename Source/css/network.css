@@ -42,6 +42,51 @@
   background: rgba(229, 185, 92, 0.08);
 }
 
+.network-banner {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid rgba(245, 239, 227, 0.14);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.network-banner--offline {
+  border-color: rgba(240, 145, 134, 0.42);
+  color: #f5b8b1;
+  background: rgba(240, 145, 134, 0.1);
+}
+
+.network-banner--online {
+  border-color: rgba(111, 207, 163, 0.42);
+  color: #bfe8d4;
+  background: rgba(52, 138, 105, 0.16);
+}
+
+.badge--offline {
+  color: #f5b8b1;
+  border-color: rgba(240, 145, 134, 0.5);
+  background: rgba(240, 145, 134, 0.14);
+}
+
+.action-bar__status--offline {
+  color: #f5b8b1;
+}
+
+.action-bar__status--pending {
+  color: var(--color-gold-bright);
+}
+
+.game-over__wait {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
 .network-field {
   display: flex;
   flex-direction: column;

@@ -10,7 +10,11 @@ import { HostSession } from './session/host-session.js';
 import { LocalSession } from './session/local-session.js';
 import { Controller } from './ui/controller.js';
 import { createLogDrawer } from './ui/log-drawer.js';
-import { showToast } from './ui/modals.js';
+import {
+  closeModal,
+  openConfirmNetworkExitModal,
+  showToast,
+} from './ui/modals.js';
 import { hasSeenOnboarding, openOnboarding } from './ui/onboarding.js';
 import { openRulesModal } from './ui/rules-modal.js';
 import {
@@ -151,6 +155,25 @@ function bootstrap() {
   const controller = new Controller({
     session: localSession,
     elements: { ...elements, logDrawer },
+    onSessionClosed: (payload) => {
+      const network = activeNetwork;
+
+      // A closed/expired room invalidates the saved guest token. `leave()`
+      // clears storage synchronously before its best-effort relay request.
+      if (network?.role === 'guest' && network.lobby) {
+        void network.lobby.leave().catch(() => {});
+      }
+
+      activateLocal();
+      controller.resume();
+      showToast(
+        payload?.message ?? 'Сетевая игра завершена. Вы вернулись в локальную партию.',
+        'info',
+      );
+    },
+    onExitNetwork: () => {
+      void requestExitNetwork();
+    },
   });
 
   let activeMode = 'local';
@@ -186,6 +209,10 @@ function bootstrap() {
     if (elements.newGameButton) {
       elements.newGameButton.disabled = false;
     }
+
+    if (elements.networkButton) {
+      elements.networkButton.textContent = 'Сетевая игра';
+    }
   }
 
   /**
@@ -210,6 +237,12 @@ function bootstrap() {
     if (elements.newGameButton) {
       elements.newGameButton.disabled = session.capabilities?.canRestart === false;
     }
+
+    if (elements.networkButton) {
+      elements.networkButton.textContent = role === 'host'
+        ? 'Завершить сетевую игру'
+        : 'Выйти из сетевой игры';
+    }
   }
 
   /**
@@ -228,11 +261,51 @@ function bootstrap() {
     }
 
     if (network?.lobby) {
-      void network.lobby.leave().catch(() => {});
+      try {
+        if (network.role === 'host') {
+          await network.lobby.closeRoom();
+        } else {
+          await network.lobby.leave();
+        }
+      } catch {
+        // The room may already be closed or expired; local cleanup still runs.
+      }
     }
 
     activateLocal();
+    controller.resume();
     showToast('Вы вернулись в локальную игру.', 'info');
+  }
+
+  /**
+   * Asks for confirmation before leaving a network game. The host closes the
+   * room for everyone; a guest only frees their seat.
+   *
+   * @returns {void}
+   */
+  function requestExitNetwork() {
+    if (activeMode !== 'network' || !activeNetwork) {
+      activateLocal();
+      controller.resume();
+      return;
+    }
+
+    controller.pause();
+
+    const modal = openConfirmNetworkExitModal({
+      isHost: activeNetwork.role === 'host',
+      onConfirm: () => {
+        closeModal({ silent: true });
+        void exitNetwork();
+      },
+      onCancel: () => {
+        controller.resume();
+      },
+    });
+
+    if (!modal) {
+      controller.resume();
+    }
   }
 
   /**
@@ -290,17 +363,34 @@ function bootstrap() {
             token: networkLobby.token,
             playerId: networkLobby.playerId,
             name: networkLobby.name,
+            continuous: true,
           });
           let activated = false;
           let offError = () => {};
+          let offClosed = () => {};
+          const cleanup = () => {
+            off();
+            offError();
+            offClosed();
+          };
+          const returnToLocal = (message) => {
+            cleanup();
+            pendingNetwork = null;
+            networkModal = null;
+            guest.dispose();
+            void networkLobby.leave().catch(() => {});
+            close();
+            activateLocal();
+            controller.resume();
+            showToast(message, 'info');
+          };
           const off = guest.on(GAME_EVENTS.STATE_CHANGE, () => {
             if (activated) {
               return;
             }
 
             activated = true;
-            off();
-            offError();
+            cleanup();
             pendingNetwork = null;
             networkModal = null;
             activateNetworkSession(guest, networkLobby, 'guest');
@@ -312,15 +402,12 @@ function bootstrap() {
               return;
             }
 
-            off();
-            offError();
-            pendingNetwork = null;
-            networkModal = null;
-            guest.dispose();
-            close();
-            activateLocal();
-            controller.resume();
-            showToast('Комната закрыта или недоступна. Вы вернулись в локальную игру.');
+            returnToLocal('Комната закрыта или недоступна. Вы вернулись в локальную игру.');
+          });
+          offClosed = guest.on('sessionclosed', (payload) => {
+            returnToLocal(
+              payload?.message ?? 'Комната закрыта или недоступна. Вы вернулись в локальную игру.',
+            );
           });
 
           pendingNetwork = { session: guest, lobby: networkLobby };
@@ -328,14 +415,15 @@ function bootstrap() {
           try {
             await guest.start();
           } catch (error) {
-            off();
-            offError();
+            cleanup();
             pendingNetwork = null;
             guest.dispose();
             showToast(
-              error instanceof Error && error.message
-                ? error.message
-                : 'Не удалось подключиться к комнате.',
+              error?.status === 410
+                ? 'Комната закрыта хостом.'
+                : (error instanceof Error && error.message
+                  ? error.message
+                  : 'Не удалось подключиться к комнате.'),
             );
           }
         },
@@ -367,7 +455,7 @@ function bootstrap() {
 
   elements.networkButton?.addEventListener('click', () => {
     if (activeMode === 'network') {
-      void exitNetwork();
+      requestExitNetwork();
       return;
     }
 

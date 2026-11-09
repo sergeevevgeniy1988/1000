@@ -628,9 +628,11 @@ function createFinalTable(state) {
  * @param {object} state
  * @param {object} options
  * @param {() => void} options.onNewGame
+ * @param {boolean} [options.isHost] Only the host may start a new game.
+ * @param {(() => void) | null} [options.onLeave]
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openGameOverModal(state, { onNewGame }) {
+export function openGameOverModal(state, { onNewGame, isHost = true, onLeave = null }) {
   const viewerId = resolveViewerId(state);
   const winner = findPlayer(state, state.winnerId);
   const viewer = viewerId === null ? null : findPlayer(state, viewerId);
@@ -665,15 +667,36 @@ export function openGameOverModal(state, { onNewGame }) {
   body.append(hero, createFinalTable(state));
 
   const footer = createElement('div', { className: 'modal__footer-row' });
-  const newGameButton = createElement('button', {
-    className: 'button',
-    text: 'Новая игра',
-    attrs: { type: 'button', 'data-autofocus': 'true' },
-    dataset: { action: 'new-game' },
-  });
 
-  newGameButton.addEventListener('click', onNewGame);
-  footer.append(newGameButton);
+  if (isHost !== false) {
+    const newGameButton = createElement('button', {
+      className: 'button',
+      text: 'Новая игра',
+      attrs: { type: 'button', 'data-autofocus': 'true' },
+      dataset: { action: 'new-game' },
+    });
+
+    newGameButton.addEventListener('click', onNewGame);
+    footer.append(newGameButton);
+  } else {
+    footer.append(createElement('p', {
+      className: 'game-over__wait',
+      text: 'Ждём, пока хост начнёт новую игру.',
+      attrs: { role: 'status' },
+    }));
+
+    if (typeof onLeave === 'function') {
+      const leaveButton = createElement('button', {
+        className: 'button button--ghost',
+        text: 'Выйти',
+        attrs: { type: 'button', 'data-autofocus': 'true' },
+        dataset: { action: 'leave-network' },
+      });
+
+      leaveButton.addEventListener('click', onLeave);
+      footer.append(leaveButton);
+    }
+  }
 
   const modal = openModal({
     kind: 'gameover',
@@ -756,6 +779,63 @@ export function openConfirmNewGameModal({ onConfirm, onCancel }) {
   return openModal({
     kind: 'confirm',
     title: 'Новая игра?',
+    body,
+    footer,
+    dismissible: true,
+    className: 'modal--confirm',
+    onClose: onCancel,
+  });
+}
+
+/**
+ * Opens the confirmation dialog for leaving a network game. The host closes
+ * the room for everyone; a guest only frees their own seat.
+ *
+ * @param {object} options
+ * @param {boolean} [options.isHost]
+ * @param {() => void} [options.onConfirm]
+ * @param {() => void} [options.onCancel]
+ * @returns {{ element: HTMLElement, close: () => void } | null}
+ */
+export function openConfirmNetworkExitModal({ isHost = false, onConfirm, onCancel } = {}) {
+  const body = createElement('div', { className: 'confirm' });
+
+  body.append(
+    createElement('p', {
+      className: 'confirm__text',
+      text: isHost
+        ? 'Комната будет закрыта для всех игроков. Гости вернутся в локальную игру.'
+        : 'Вы выйдете из сетевой игры и вернётесь в локальную партию.',
+    }),
+    createElement('p', {
+      className: 'confirm__note',
+      text: 'Текущая сетевая партия не сохранится.',
+    }),
+  );
+
+  const footer = createElement('div', { className: 'modal__footer-row' });
+  const cancelButton = createElement('button', {
+    className: 'button button--ghost',
+    text: 'Продолжить игру',
+    attrs: { type: 'button', 'data-autofocus': 'true' },
+    dataset: { action: 'cancel-network-exit' },
+  });
+  const confirmButton = createElement('button', {
+    className: 'button',
+    text: isHost ? 'Завершить сетевую игру' : 'Выйти',
+    attrs: { type: 'button' },
+    dataset: { action: 'confirm-network-exit' },
+  });
+
+  cancelButton.addEventListener('click', () => closeModal());
+  confirmButton.addEventListener('click', () => {
+    onConfirm?.();
+  });
+  footer.append(cancelButton, confirmButton);
+
+  return openModal({
+    kind: 'confirm-network-exit',
+    title: isHost ? 'Завершить сетевую игру?' : 'Выйти из сетевой игры?',
     body,
     footer,
     dismissible: true,

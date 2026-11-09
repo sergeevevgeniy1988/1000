@@ -2,6 +2,7 @@ import { BIDDING, GAME_EVENTS, PHASES } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
 import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
+import { getConnectionBanner } from '../net/lobby.js';
 import { clearElement, createElement } from './dom.js';
 import {
   formatGenitiveNames,
@@ -70,10 +71,15 @@ export class Controller {
   #newGameHandler = null;
   #announcer = null;
   #renderToken = 0;
+  #sessionClosed = false;
+  #onSessionClosed = null;
+  #onExitNetwork = null;
 
   /**
    * @param {object} options
    * @param {object} options.session Session owning the game state.
+   * @param {(payload?: object) => void} [options.onSessionClosed]
+   * @param {() => void} [options.onExitNetwork]
    * @param {object} options.elements
    * @param {HTMLElement} options.elements.opponents
    * @param {HTMLElement} options.elements.humanPanel
@@ -88,7 +94,12 @@ export class Controller {
    * @param {HTMLElement | null} [options.elements.announcer]
    * @param {{ close: (options?: { restoreFocus?: boolean }) => void } | null} [options.elements.logDrawer]
    */
-  constructor({ session, elements }) {
+  constructor({
+    session,
+    elements,
+    onSessionClosed = null,
+    onExitNetwork = null,
+  }) {
     if (!session || typeof session.getState !== 'function') {
       throw new TypeError('Controller requires a game session.');
     }
@@ -96,6 +107,8 @@ export class Controller {
     this.#session = session;
     this.#elements = elements;
     this.#announcer = createAnnouncer(elements.announcer ?? null);
+    this.#onSessionClosed = typeof onSessionClosed === 'function' ? onSessionClosed : null;
+    this.#onExitNetwork = typeof onExitNetwork === 'function' ? onExitNetwork : null;
 
     this.#newGameHandler = () => this.requestNewGame();
 
@@ -130,6 +143,7 @@ export class Controller {
     this.#resetUiState();
     this.#unsubscribeAll();
     this.#session = session ?? null;
+    this.#sessionClosed = false;
     this.#aiCache.clear();
 
     if (this.#session && this.#started) {
@@ -309,6 +323,9 @@ export class Controller {
       session.on(GAME_EVENTS.TRICK_WON, (payload) => this.#handleTrickWon(payload)),
       session.on(GAME_EVENTS.SCORED, () => playSound('score')),
       session.on(GAME_EVENTS.GAME_OVER, () => playSound('win')),
+      session.on('offline', (payload) => this.#handleConnectionChange(false, payload)),
+      session.on('online', (payload) => this.#handleConnectionChange(true, payload)),
+      session.on('sessionclosed', (payload) => this.#handleSessionClosed(payload)),
     ];
 
     this.#aiCache.clear();
@@ -343,6 +360,58 @@ export class Controller {
 
     console.error('[1000]', error);
     showToast('Не удалось выполнить действие. Попробуйте ещё раз.');
+  }
+
+  /**
+   * Shows a network status change and re-renders the action bar so the
+   * offline/online banner reflects the session state immediately.
+   *
+   * @param {boolean} connected
+   * @param {{ message?: string } | undefined} payload
+   * @returns {void}
+   */
+  #handleConnectionChange(connected, payload) {
+    if (!this.#session || this.#sessionClosed) {
+      return;
+    }
+
+    const message = typeof payload?.message === 'string' && payload.message.length > 0
+      ? payload.message
+      : (connected ? 'Связь восстановлена.' : 'Нет связи с комнатой.');
+
+    showToast(message, 'info');
+
+    const state = this.#session.getState?.();
+
+    if (state) {
+      this.#render(state);
+    }
+  }
+
+  /**
+   * Ends the controller view of a network session. The owner (main.js) decides
+   * whether to return to the local game.
+   *
+   * @param {({ code?: string, message?: string } | undefined)} payload
+   * @returns {void}
+   */
+  #handleSessionClosed(payload) {
+    if (this.#sessionClosed) {
+      return;
+    }
+
+    this.#sessionClosed = true;
+    this.#clearTimers();
+    closeModal({ silent: true });
+
+    showToast(
+      typeof payload?.message === 'string' && payload.message.length > 0
+        ? payload.message
+        : 'Сетевая сессия завершена.',
+      'info',
+    );
+
+    this.#onSessionClosed?.(payload);
   }
 
   /**
@@ -472,36 +541,89 @@ export class Controller {
   }
 
   /**
-   * Shows host-side presence during the game. The lobby modal covers the
-   * pre-game presence; this indicator keeps offline guests visible at the
-   * table without changing the game state.
+   * Shows host- and guest-side presence during the game. The lobby modal covers
+   * the pre-game presence; this indicator keeps offline seats and a lost local
+   * connection visible at the table without changing the game state.
    *
    * @returns {void}
    */
   #renderPresence() {
     const session = this.#session;
 
-    if (
-      !session
-      || session.capabilities?.isHost !== true
-      || typeof session.getPresence !== 'function'
-    ) {
+    if (!session) {
       return;
     }
 
-    const offline = session.getPresence()
-      .filter((seat) => seat.occupied === true && seat.connected !== true);
+    const localOffline = session.connected === false;
+    const seats = typeof session.getPresence === 'function'
+      ? session.getPresence()
+      : [];
+    const offline = seats.filter(
+      (seat) => seat.occupied === true && seat.connected !== true,
+    );
 
-    if (offline.length === 0) {
+    if (!localOffline && offline.length === 0) {
+      return;
+    }
+
+    const items = [];
+
+    if (localOffline) {
+      const banner = getConnectionBanner({ connected: false });
+
+      items.push(createElement('span', {
+        className: ['action-bar__status', 'action-bar__status--offline', banner.className],
+        text: banner.text,
+      }));
+    }
+
+    if (offline.length > 0) {
+      items.push(createElement('span', {
+        className: 'action-bar__status action-bar__status--offline',
+        text: `Нет связи: ${offline.map((seat) => seat.name).join(', ')}.`,
+      }));
+    }
+
+    this.#elements.actionBar.append(
+      createElement('div', { className: 'action-bar__group' }, ...items),
+    );
+  }
+
+  /**
+   * Shows the pending-action status while the relay/host confirms a guest
+   * action. The status also blocks duplicate controls through `isPending`.
+   *
+   * @returns {void}
+   */
+  #renderPendingStatus() {
+    if (this.#session?.isPending !== true) {
       return;
     }
 
     this.#elements.actionBar.append(createElement('div', { className: 'action-bar__group' }, ...[
       createElement('span', {
-        className: 'action-bar__status action-bar__status--offline',
-        text: `Нет связи: ${offline.map((seat) => seat.name).join(', ')}.`,
+        className: 'action-bar__status action-bar__status--pending',
+        text: 'Отправляем…',
+        attrs: { role: 'status' },
       }),
     ]));
+  }
+
+  /**
+   * Guest views intentionally omit the public log; the session keeps the merged
+   * deltas. Local and host views already carry their own log.
+   *
+   * @param {object} state
+   * @returns {object}
+   */
+  #withSessionLog(state) {
+    if (!state || Array.isArray(state.log)) {
+      return state;
+    }
+
+    const log = Array.isArray(this.#session?.log) ? this.#session.log : null;
+
+    return log ? { ...state, log } : state;
   }
 
   /**
@@ -509,6 +631,8 @@ export class Controller {
    * @returns {void}
    */
   #render(state) {
+    state = this.#withSessionLog(state);
+
     const reveal = this.#trickReveal;
     const displayState = reveal
       ? { ...state, currentTrick: reveal.cards, currentPlayerId: null }
@@ -553,6 +677,7 @@ export class Controller {
     renderLog(state, this.#elements.gameLog);
     this.#renderHeader(state);
     this.#renderActionBar(state, reveal);
+    this.#renderPendingStatus();
     this.#renderPresence();
 
     if (focusSnapshot && !restoreFocus(this.#elements.board, focusSnapshot)) {
@@ -799,12 +924,17 @@ export class Controller {
           text: 'Раздача завершена — итоги в окне результатов.',
         }));
         break;
-      case PHASES.GAME_OVER:
+      case PHASES.GAME_OVER: {
+        const canRestart = this.#session.capabilities?.canRestart !== false;
+
         bar.append(createElement('span', {
           className: 'action-bar__status action-bar__status--result',
-          text: 'Игра окончена. Итоговая таблица открыта.',
+          text: canRestart
+            ? 'Игра окончена. Итоговая таблица открыта.'
+            : 'Игра окончена. Ждём, пока хост начнёт новую игру.',
         }));
         break;
+      }
       default:
         bar.append(createElement('span', {
           className: 'action-bar__status',
@@ -820,7 +950,7 @@ export class Controller {
    * @returns {string[] | null}
    */
   #getViewerLegalCardIds(state, viewerId, revealActive) {
-    if (revealActive || viewerId === null) {
+    if (revealActive || viewerId === null || this.#session?.isPending === true) {
       return null;
     }
 
@@ -904,11 +1034,20 @@ export class Controller {
   }
 
   /**
+   * Blocks duplicate guest actions while the previous one is in flight.
+   *
+   * @returns {boolean}
+   */
+  #isActionBlocked() {
+    return this.#paused || !this.#session || this.#session.isPending === true;
+  }
+
+  /**
    * @param {number | null} amount `null` means pass.
    * @returns {void}
    */
   #humanBid(amount) {
-    if (this.#paused || !this.#session) {
+    if (this.#isActionBlocked()) {
       return;
     }
 
@@ -924,7 +1063,7 @@ export class Controller {
    * @returns {void}
    */
   #humanPlayCard(card) {
-    if (this.#paused || this.#trickReveal || !this.#session) {
+    if (this.#trickReveal || this.#isActionBlocked()) {
       return;
     }
 
@@ -942,7 +1081,7 @@ export class Controller {
   #humanDeclareMarriage(suit) {
     this.#marriageMenuOpen = false;
 
-    if (!this.#session) {
+    if (this.#isActionBlocked()) {
       return;
     }
 
@@ -960,7 +1099,7 @@ export class Controller {
    * @returns {void}
    */
   #humanCancelMarriage() {
-    if (!this.#session) {
+    if (this.#isActionBlocked()) {
       return;
     }
 
@@ -980,11 +1119,13 @@ export class Controller {
    * @returns {void}
    */
   #applyHumanGifts(gifts) {
-    if (!this.#session) {
+    if (this.#isActionBlocked()) {
       return;
     }
 
     try {
+      // A guest queues both gifts in one click; the session posts them with
+      // separate action ids while the controller blocks further clicks.
       for (const gift of gifts) {
         this.#session.giveCard(gift.toPlayerId, gift.cardId);
       }
@@ -1001,7 +1142,7 @@ export class Controller {
    * @returns {void}
    */
   #resolveHumanRaise(amountOrNull) {
-    if (this.#paused || !this.#session) {
+    if (this.#isActionBlocked()) {
       return;
     }
 
@@ -1053,6 +1194,7 @@ export class Controller {
     }
 
     const viewerId = this.#getViewerId(state);
+    const isHost = this.#session?.capabilities?.isHost === true;
     const kind = getOpenModalKind();
     const mandatoryModal = state.phase === PHASES.PRIKUP
       || (state.phase === PHASES.GIVING && state.declarerId === viewerId)
@@ -1069,6 +1211,7 @@ export class Controller {
         openPrikupRevealModal({
           state,
           viewerId,
+          isHost,
           onTakePrikup: () => this.#takePrikup(state.declarerId),
         });
       }
@@ -1122,6 +1265,8 @@ export class Controller {
         closeModal({ silent: true });
         openGameOverModal(state, {
           onNewGame: () => this.newGame(),
+          isHost,
+          onLeave: () => this.#onExitNetwork?.(),
         });
       }
 
@@ -1147,7 +1292,7 @@ export class Controller {
    * @returns {void}
    */
   #takePrikup(declarerId) {
-    if (!this.#session || typeof declarerId !== 'string') {
+    if (this.#isActionBlocked() || typeof declarerId !== 'string') {
       return;
     }
 

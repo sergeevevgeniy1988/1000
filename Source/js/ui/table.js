@@ -38,6 +38,35 @@ function isActing(state, player) {
 }
 
 /**
+ * Only an AI seat that is currently acting shows the "думает" indicator. Live
+ * players, including disconnected guests, never do.
+ *
+ * @param {object | null | undefined} player
+ * @param {object | null | undefined} state
+ * @returns {boolean}
+ */
+export function shouldShowThinking(player, state) {
+  return Boolean(
+    player
+    && state
+    && player.isAI && isActing(state, player),
+  );
+}
+
+/**
+ * @param {object} state
+ * @param {string} playerId
+ * @returns {object | null}
+ */
+function getPresence(state, playerId) {
+  if (!Array.isArray(state?.network?.presence)) {
+    return null;
+  }
+
+  return state.network.presence.find((seat) => seat?.playerId === playerId) ?? null;
+}
+
+/**
  * @param {string} text
  * @param {string} variant
  * @returns {HTMLElement}
@@ -189,6 +218,12 @@ export function createPlayerPanel(state, player, viewerId = null) {
     badges.append(createBadge('Играющий', 'declarer'));
   }
 
+  const presence = getPresence(state, player.id);
+
+  if (presence && presence.occupied === true && presence.connected !== true) {
+    badges.append(createBadge('нет связи', 'offline'));
+  }
+
   const stats = createElement('div', { className: 'player-card__stats' });
   const score = createElement('div', { className: 'score' });
 
@@ -210,7 +245,7 @@ export function createPlayerPanel(state, player, viewerId = null) {
     statusRow.append(status);
   }
 
-  if (player.isAI && isActing(state, player)) {
+  if (shouldShowThinking(player, state)) {
     statusRow.append(createThinkingIndicator());
   }
 

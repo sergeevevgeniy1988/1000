@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { DEAL, PHASES } from '../js/core/constants.js';
+import { getConnectionBanner, getSeatStatus } from '../js/net/lobby.js';
 import { getPhaseAnnouncement } from '../js/ui/announcements.js';
 import { getActionErrorMessage } from '../js/ui/errors.js';
 import {
@@ -9,6 +11,8 @@ import {
   formatGenitiveNames,
   resolveViewerId,
 } from '../js/ui/format.js';
+import { canViewerTakePrikup } from '../js/ui/prikup.js';
+import { shouldShowThinking } from '../js/ui/table.js';
 
 /**
  * @param {Partial<object>} [overrides]
@@ -285,4 +289,123 @@ test('viewer resolution and name lists keep the "Вы" forms', () => {
   assert.equal(formatDativeNames(['Анна', 'Борис']), 'Анне и Борису');
   assert.equal(formatGenitiveNames(['Вы']), 'Вас');
   assert.equal(formatDativeNames(['Вы']), 'Вам');
+});
+
+test('seat presence badges describe AI, online and offline seats', () => {
+  assert.equal(getSeatStatus({ occupied: false }), 'AI');
+  assert.equal(getSeatStatus({ occupied: true, connected: true }), 'в комнате');
+  assert.equal(getSeatStatus({ occupied: true, connected: false }), 'нет связи');
+  assert.equal(getSeatStatus(null), 'AI');
+
+  assert.match(getConnectionBanner({ connected: false }).className, /network-banner--offline/);
+  assert.match(getConnectionBanner({ connected: false }).text, /Нет связи/);
+  assert.match(getConnectionBanner({ connected: true }).className, /network-banner--online/);
+});
+
+test('only the declarer or the AI-controlling host may take the prikup', () => {
+  assert.equal(canViewerTakePrikup({
+    declarerId: 'guest',
+    viewerId: 'guest',
+  }), true);
+  assert.equal(canViewerTakePrikup({
+    declarerId: 'ai',
+    viewerId: 'guest',
+    declarerIsAI: true,
+    isHost: true,
+  }), true);
+  assert.equal(canViewerTakePrikup({
+    declarerId: 'ai',
+    viewerId: 'guest',
+    declarerIsAI: true,
+    isHost: false,
+  }), false);
+  assert.equal(canViewerTakePrikup({
+    declarerId: 'host',
+    viewerId: 'guest',
+    declarerIsAI: false,
+    isHost: false,
+  }), false);
+  assert.equal(canViewerTakePrikup({ declarerId: null, viewerId: 'guest' }), false);
+});
+
+test('the thinking indicator belongs to an acting AI seat, never a live player', () => {
+  const ai = { id: 'ai', name: 'Борис', isAI: true };
+  const human = { id: 'guest', name: 'Анна', isAI: false };
+  const state = createMultiHumanState({ currentPlayerId: 'ai' });
+
+  assert.equal(shouldShowThinking(ai, state), true);
+  assert.equal(shouldShowThinking(human, { ...state, currentPlayerId: 'guest' }), false);
+  assert.equal(shouldShowThinking(ai, { ...state, currentPlayerId: 'guest' }), false);
+  assert.equal(shouldShowThinking(human, state), false);
+});
+
+test('offline announcements wait for the disconnected acting seat', () => {
+  const state = createMultiHumanState({
+    viewerId: 'host',
+    currentPlayerId: 'guest',
+    network: {
+      presence: [
+        { playerId: 'host', name: 'Иван', occupied: true, connected: true },
+        { playerId: 'guest', name: 'Анна', occupied: true, connected: false },
+        { playerId: 'ai', name: 'Борис', occupied: false, connected: false },
+      ],
+    },
+  });
+
+  assert.equal(
+    getPhaseAnnouncement(state, { humanId: 'host' }),
+    'Ждём Анна — нет связи.',
+  );
+  assert.equal(
+    getPhaseAnnouncement({ ...state, currentPlayerId: 'host' }, { humanId: 'host' }),
+    'Ваш ход в торгах.',
+  );
+});
+
+test('guest UI gates actions, pending status and host-only controls', () => {
+  const controllerSource = readFileSync(
+    new URL('../js/ui/controller.js', import.meta.url),
+    'utf8',
+  );
+  const prikupSource = readFileSync(
+    new URL('../js/ui/prikup.js', import.meta.url),
+    'utf8',
+  );
+  const modalsSource = readFileSync(
+    new URL('../js/ui/modals.js', import.meta.url),
+    'utf8',
+  );
+  const lobbySource = readFileSync(
+    new URL('../js/net/lobby.js', import.meta.url),
+    'utf8',
+  );
+  const cssSource = readFileSync(
+    new URL('../css/network.css', import.meta.url),
+    'utf8',
+  );
+  const mainSource = readFileSync(
+    new URL('../js/main.js', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(controllerSource, /isPending/);
+  assert.match(controllerSource, /Отправляем…/);
+  assert.match(controllerSource, /capabilities\?\.controlsAI === false/);
+  assert.match(controllerSource, /capabilities\?\.canRestart === false/);
+  assert.match(controllerSource, /isHost/);
+
+  assert.match(prikupSource, /declarer\.id === resolvedViewerId/);
+  assert.match(prikupSource, /isHost/);
+
+  assert.match(modalsSource, /Следующая раздача/);
+  assert.match(modalsSource, /isHost/);
+  assert.match(modalsSource, /Ждём, пока хост начнёт новую игру/);
+
+  assert.match(lobbySource, /network-banner--offline/);
+  assert.match(lobbySource, /network-banner--online/);
+  assert.match(cssSource, /\.network-banner--offline/);
+  assert.match(cssSource, /\.network-banner--online/);
+
+  assert.match(mainSource, /dispose\?\.\(\)/);
+  assert.match(mainSource, /sessionclosed/);
 });

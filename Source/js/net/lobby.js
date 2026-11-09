@@ -29,6 +29,35 @@ export const AI_SEAT_NAMES = Object.freeze({
   human: 'Вы',
 });
 
+/** Stable banner classes shared by the lobby UI and the game controller. */
+export const NETWORK_BANNER_ONLINE_CLASS = 'network-banner network-banner--online';
+export const NETWORK_BANNER_OFFLINE_CLASS = 'network-banner network-banner--offline';
+
+/**
+ * Builds the connection banner shown while the relay is reachable or after a
+ * poll failed. The text never contains tokens or server internals.
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.connected]
+ * @param {string} [options.name]
+ * @returns {{ className: string, text: string }}
+ */
+export function getConnectionBanner({ connected = true, name = '' } = {}) {
+  if (connected !== false) {
+    return {
+      className: NETWORK_BANNER_ONLINE_CLASS,
+      text: 'Связь с комнатой есть.',
+    };
+  }
+
+  return {
+    className: NETWORK_BANNER_OFFLINE_CLASS,
+    text: typeof name === 'string' && name.length > 0
+      ? `Нет связи: ${name}. Пытаемся переподключиться…`
+      : 'Нет связи с комнатой. Пытаемся переподключиться…',
+  };
+}
+
 export const HOST_STORAGE_PREFIX = 'thousand.network.host.';
 export const GUEST_STORAGE_PREFIX = 'thousand.network.guest.';
 export const TAB_LOCK_PREFIX = 'thousand.network.tab.';
@@ -963,6 +992,33 @@ export class NetworkLobby {
    */
   #relayFailure(error) {
     if (error instanceof RelayError) {
+      if (error.status === 410) {
+        return {
+          ok: false,
+          code: 'room_closed',
+          message: 'Комната закрыта хостом.',
+          status: 410,
+        };
+      }
+
+      if (error.status === 404) {
+        return {
+          ok: false,
+          code: 'room_not_found',
+          message: 'Комната не найдена. Проверьте код.',
+          status: 404,
+        };
+      }
+
+      if (error.status === 401) {
+        return {
+          ok: false,
+          code: 'invalid_token',
+          message: 'Место больше недоступно. Присоединитесь заново.',
+          status: 401,
+        };
+      }
+
       return {
         ok: false,
         code: error.code,

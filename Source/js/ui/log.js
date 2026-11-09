@@ -320,7 +320,7 @@ export function resetLog(logEl) {
 export function renderLog(state, logEl) {
   const parsed = Number.parseInt(logEl.dataset.renderedCount ?? '0', 10);
   const renderedCount = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  const entries = state.log;
+  const entries = Array.isArray(state?.log) ? state.log : [];
 
   if (entries.length < renderedCount) {
     resetLog(logEl);
