@@ -161,6 +161,23 @@ test('marriage bonuses count towards the deal total and the contract', () => {
   assert.equal(human.delta, 110);
 });
 
+test('a raised contract above 120 is scored normally', () => {
+  const dealScore = scoreDeal({
+    players: [
+      player('human', { tricksWon: 4, trickPoints: 75, marriagePoints: 160 }),
+      player('alice', { tricksWon: 2, trickPoints: 25, marriagePoints: 40 }),
+      player('boris', { tricksWon: 2, trickPoints: 20 }),
+    ],
+    declarerId: 'human',
+    contract: 220,
+  });
+
+  assert.equal(dealScore.contract, 220);
+  assert.equal(dealScore.declarerTotal, 235);
+  assert.equal(dealScore.contractMet, true);
+  assert.equal(resultFor(dealScore, 'human').delta, 220);
+});
+
 test('a player with no tricks receives a bolt', () => {
   const dealScore = scoreDeal({
     players: [
@@ -294,6 +311,16 @@ test('scoreDeal rejects malformed input', () => {
 
   assert.throws(
     () => scoreDeal({ players: validPlayers, declarerId: 'human', contract: 107 }),
+    (error) => error instanceof GameError && error.code === 'INVALID_ARGUMENT',
+  );
+
+  assert.throws(
+    () => scoreDeal({ players: validPlayers, declarerId: 'human', contract: 405 }),
+    (error) => error instanceof GameError && error.code === 'INVALID_ARGUMENT',
+  );
+
+  assert.throws(
+    () => scoreDeal({ players: validPlayers, declarerId: 'human', contract: -5 }),
     (error) => error instanceof GameError && error.code === 'INVALID_ARGUMENT',
   );
 

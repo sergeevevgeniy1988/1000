@@ -1,4 +1,4 @@
-import { BIDDING, BOLTS, TARGET_SCORE } from './constants.js';
+import { BIDDING, BOLTS, MAX_CONTRACT, TARGET_SCORE } from './constants.js';
 import { GameError } from './errors.js';
 
 /**
@@ -142,12 +142,12 @@ export function scoreDeal({ players, declarerId, contract }) {
   if (
     !Number.isInteger(contract)
     || contract < BIDDING.MIN
-    || contract > BIDDING.MAX
+    || contract > MAX_CONTRACT
     || contract % BIDDING.STEP !== 0
   ) {
     throw new GameError(
       'INVALID_ARGUMENT',
-      `Заказ должен быть целым числом от ${BIDDING.MIN} до ${BIDDING.MAX} с шагом ${BIDDING.STEP}.`,
+      `Заказ должен быть целым числом от ${BIDDING.MIN} до ${MAX_CONTRACT} с шагом ${BIDDING.STEP}.`,
       { contract },
     );
   }

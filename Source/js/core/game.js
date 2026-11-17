@@ -13,6 +13,7 @@ import { deepFreeze, normalizeDeck, normalizePlayers } from './game-setup.js';
 import {
   getAvailableMarriages,
   getLegalCards,
+  getMaxContract,
   getTrickPoints,
   getTrickWinner,
   isMarriageConfirmationCard,
@@ -322,12 +323,14 @@ export class Game {
       || !Number.isInteger(amountOrNull)
       || amountOrNull % BIDDING.STEP !== 0
       || amountOrNull <= this.#contract
-      || amountOrNull > BIDDING.MAX
+      || amountOrNull > getMaxContract(player.hand)
     ) {
+      const maxContract = getMaxContract(player.hand);
+
       this.#fail(
         'INVALID_RAISE',
-        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${BIDDING.MAX}.`,
-        { amount: amountOrNull, contract: this.#contract },
+        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${maxContract}.`,
+        { amount: amountOrNull, contract: this.#contract, maxContract },
       );
     }
 

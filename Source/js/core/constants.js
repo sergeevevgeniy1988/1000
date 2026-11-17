@@ -98,6 +98,13 @@ export const BIDDING = Object.freeze({
   STEP: 5,
 });
 
+/**
+ * Highest contract a declarer may raise to after taking the prikup: the top
+ * bid plus the bonuses of every marriage that can be collected in the hand.
+ */
+export const MAX_CONTRACT = BIDDING.MAX
+  + Object.values(MARRIAGE_BONUSES).reduce((sum, bonus) => sum + bonus, 0);
+
 /** Card and deal sizes for the three-player game. */
 export const DEAL = Object.freeze({
   CARD_COUNT: 24,

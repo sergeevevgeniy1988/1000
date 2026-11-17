@@ -1,4 +1,4 @@
-import { MARRIAGE_BONUSES, SUITS } from './constants.js';
+import { BIDDING, MARRIAGE_BONUSES, MAX_CONTRACT, SUITS } from './constants.js';
 import { getCardById } from './deck.js';
 import { GameError } from './errors.js';
 
@@ -303,6 +303,22 @@ export function getAvailableMarriages(hand, declaredMarriages = []) {
     suit,
     value: MARRIAGE_BONUSES[suit],
   }));
+}
+
+/**
+ * Returns the highest contract a player may raise to: the top bid plus the
+ * bonuses of every marriage still available in the hand. Declared marriages are
+ * ignored because a raise happens before any marriage is declared.
+ *
+ * @param {ReadonlyArray<CardLike>} hand
+ * @returns {number}
+ * @throws {GameError} When the hand is invalid.
+ */
+export function getMaxContract(hand) {
+  const bonus = getAvailableMarriages(hand)
+    .reduce((sum, marriage) => sum + marriage.value, 0);
+
+  return Math.min(MAX_CONTRACT, BIDDING.MAX + bonus);
 }
 
 /**

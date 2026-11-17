@@ -191,10 +191,21 @@ test('declining the raise keeps the contract and closes the window', () => {
   expectError(() => game.raiseContract('alice', 85), 'RAISE_ALREADY_DECIDED');
 });
 
+test('the declarer may raise above 120 up to the marriage limit', () => {
+  for (const target of [125, 220, 300]) {
+    const game = startGivingForAlice();
+    const state = game.raiseContract('alice', target);
+
+    assert.equal(state.contract, target);
+    assert.equal(state.raiseDecided, true);
+    assert.equal(getStatePlayer(state, 'alice').bid, target);
+  }
+});
+
 test('the raise window rejects invalid amounts without changing the contract', () => {
   const game = startGivingForAlice();
 
-  for (const amount of [125, 82, 80, 75, 79]) {
+  for (const amount of [82, 80, 75, 79, 305]) {
     expectError(() => game.raiseContract('alice', amount), 'INVALID_RAISE');
   }
 
@@ -202,6 +213,25 @@ test('the raise window rejects invalid amounts without changing the contract', (
 
   assert.equal(state.contract, BIDDING.MIN);
   assert.equal(state.raiseDecided, false);
+});
+
+test('a marriage completed by the prikup raises the maximum', () => {
+  const hands = {
+    alice: ['SK', 'HA', 'DA', 'CA', 'H9', 'D9', 'S9'],
+    boris: ['SJ', 'S10', 'HK', 'HJ', 'DK', 'DJ', 'CK'],
+    human: ['SA', 'C9', 'CQ', 'DQ', 'D10', 'HQ', 'H10'],
+  };
+  const prikup = ['SQ', 'CJ', 'C10'];
+
+  const legal = startGivingForAlice({ hands, prikup });
+  const raised = legal.raiseContract('alice', 160);
+
+  assert.equal(raised.contract, 160);
+
+  const illegal = startGivingForAlice({ hands, prikup });
+
+  expectError(() => illegal.raiseContract('alice', 165), 'INVALID_RAISE');
+  assert.equal(illegal.getState().contract, BIDDING.MIN);
 });
 
 test('a raise below the current contract is rejected', () => {
