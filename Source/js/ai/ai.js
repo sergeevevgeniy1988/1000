@@ -4,6 +4,7 @@ import { GameError } from '../core/errors.js';
 import {
   getAvailableMarriages,
   getLegalCards,
+  getMaxContract,
   getTrickPoints,
   getTrickWinner,
   isMarriageConfirmationCard,
@@ -587,7 +588,8 @@ export function chooseBid(view, currentBid = view?.currentBid, options = {}) {
 /**
  * Chooses whether to raise the contract after taking the prikup. The decision
  * compares the evaluated ten-card hand with the current contract and never
- * proposes a raise for negative-score players.
+ * proposes a raise for negative-score players. The ceiling is the marriage
+ * limit of the hand (`getMaxContract`), which may be above `BIDDING.MAX`.
  *
  * @param {object} view Player view of the declarer.
  * @param {object} [options]
@@ -620,8 +622,9 @@ export function chooseContractRaise(view, options = {}) {
     }
 
     const contract = Number.isFinite(view.contract) ? view.contract : 0;
+    const maxContract = getMaxContract(hand);
 
-    if (contract >= BIDDING.MAX) {
+    if (contract >= maxContract) {
       return null;
     }
 
@@ -637,7 +640,7 @@ export function chooseContractRaise(view, options = {}) {
       return null;
     }
 
-    return Math.min(BIDDING.MAX, target);
+    return Math.min(maxContract, target);
   } catch (error) {
     console.error('[AI] Не удалось выбрать повышение заказа.', error);
 

@@ -1,4 +1,4 @@
-import { BIDDING, SUITS } from '../core/constants.js';
+import { BIDDING, MAX_CONTRACT, SUITS } from '../core/constants.js';
 
 /**
  * Shared wire protocol for the LAN relay. The browser client and the tests use
@@ -255,6 +255,10 @@ export function isValidSeatId(value) {
 }
 
 /**
+ * Bids are limited to the auction range. A contract raise may go higher: the
+ * declarer adds the marriage bonuses of the hand after taking the prikup, up to
+ * `MAX_CONTRACT`.
+ *
  * @param {unknown} amount
  * @returns {boolean}
  */
@@ -263,6 +267,18 @@ function isValidBidAmount(amount) {
     && Number.isInteger(amount)
     && amount >= BIDDING.MIN
     && amount <= BIDDING.MAX
+    && amount % BIDDING.STEP === 0;
+}
+
+/**
+ * @param {unknown} amount
+ * @returns {boolean}
+ */
+function isValidRaiseAmount(amount) {
+  return typeof amount === 'number'
+    && Number.isInteger(amount)
+    && amount >= BIDDING.MIN
+    && amount <= MAX_CONTRACT
     && amount % BIDDING.STEP === 0;
 }
 
@@ -316,12 +332,22 @@ export function validateAction(type, payload = {}) {
   }
 
   switch (type) {
-    case ACTION_TYPES.BID:
-    case ACTION_TYPES.RAISE_CONTRACT: {
+    case ACTION_TYPES.BID: {
       if (!isValidBidAmount(payloadObject.amount)) {
         return invalid(
           'bad_amount',
           `Ставка должна быть кратна ${BIDDING.STEP} и находиться в диапазоне ${BIDDING.MIN}–${BIDDING.MAX}.`,
+        );
+      }
+
+      return { ok: true, type, payload: { amount: payloadObject.amount } };
+    }
+
+    case ACTION_TYPES.RAISE_CONTRACT: {
+      if (!isValidRaiseAmount(payloadObject.amount)) {
+        return invalid(
+          'bad_amount',
+          `Заказ можно повысить до числа от ${BIDDING.MIN} до ${MAX_CONTRACT} с шагом ${BIDDING.STEP}.`,
         );
       }
 

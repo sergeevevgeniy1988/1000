@@ -1,6 +1,6 @@
 import { BIDDING, GAME_EVENTS, PHASES } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
-import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
+import { getLegalCards, getMarriageConfirmationCards, getMaxContract } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { getConnectionBanner } from '../net/lobby.js';
 import { clearElement, createElement } from './dom.js';
@@ -23,6 +23,7 @@ import {
   createPendingMarriageStatus,
 } from './marriage.js';
 import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
+import { isLegalRaiseAmount } from './raise.js';
 import {
   closeModal,
   getOpenModalKind,
@@ -1420,7 +1421,9 @@ export class Controller {
               }
             }
 
-            if (!isLegalRaise(state, amount) || actor.score < 0) {
+            // The ceiling depends on the acting AI's own ten-card hand, so a
+            // raise above BIDDING.MAX is legal when marriages are available.
+            if (!isLegalRaise(state, amount, getMaxContract(getViewHand(view, actor.id))) || actor.score < 0) {
               amount = null;
             }
 
@@ -1617,16 +1620,30 @@ function isLegalBid(state, amount) {
  * @param {number | null} amount
  * @returns {boolean}
  */
-function isLegalRaise(state, amount) {
+function isLegalRaise(state, amount, max) {
   if (amount === null) {
     return true;
   }
 
-  return typeof amount === 'number'
-    && Number.isInteger(amount)
-    && amount % BIDDING.STEP === 0
-    && amount > state.contract
-    && amount <= BIDDING.MAX;
+  return isLegalRaiseAmount(amount, {
+    contract: Number.isFinite(state.contract) ? state.contract : 0,
+    max,
+  });
+}
+
+/**
+ * Reads the acting player's own hand from their player view.
+ *
+ * @param {object} view Player view carrying the acting AI's hand.
+ * @param {string} playerId
+ * @returns {string[]}
+ */
+function getViewHand(view, playerId) {
+  const self = Array.isArray(view?.players)
+    ? view.players.find((player) => player && player.id === playerId)
+    : null;
+
+  return Array.isArray(self?.hand) ? self.hand : [];
 }
 
 /**

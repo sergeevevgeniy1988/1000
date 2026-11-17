@@ -561,6 +561,94 @@ test('AI sees no prikup during bidding but sees it after the public reveal', () 
   }
 });
 
+test('AI proposes a contract raise above 120 when the hand has marriages', () => {
+  const HAND_WITH_MARRIAGES = ['HK', 'HQ', 'DK', 'DQ', 'SA', 'HA', 'DA', 'C10', 'S9', 'C9'];
+  const MAX = 300;
+  const ai = createAI({ playerId: 'alice', personality: 'balanced', rng: () => 0.5 });
+  const view = {
+    phase: PHASES.GIVING,
+    contract: BIDDING.MIN,
+    declarerId: 'alice',
+    raiseDecided: false,
+    givenCards: [],
+    currentTrick: [],
+    completedTricks: [],
+    log: [],
+    players: [
+      {
+        id: 'alice',
+        name: 'Алиса',
+        isHuman: false,
+        score: 0,
+        hand: HAND_WITH_MARRIAGES,
+        cardCount: HAND_WITH_MARRIAGES.length,
+        bid: BIDDING.MIN,
+        passed: false,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: true,
+      },
+      {
+        id: 'boris',
+        name: 'Борис',
+        isHuman: false,
+        score: 0,
+        hand: [],
+        cardCount: 7,
+        bid: null,
+        passed: true,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+      {
+        id: 'human',
+        name: 'Вы',
+        isHuman: true,
+        score: 0,
+        hand: [],
+        cardCount: 7,
+        bid: null,
+        passed: true,
+        tricksWon: 0,
+        trickPoints: 0,
+        marriagePoints: 0,
+        declaredMarriages: [],
+        isDeclarer: false,
+      },
+    ],
+  };
+
+  const amount = ai.chooseContractRaise(view);
+
+  assert.ok(Number.isInteger(amount), 'AI должен назвать целую сумму.');
+  assert.ok(amount > BIDDING.MAX, `Ожидалось повышение выше 120, получено ${amount}.`);
+  assert.ok(amount <= MAX, `Ожидалось не выше ${MAX}, получено ${amount}.`);
+  assert.equal(amount % BIDDING.STEP, 0);
+
+  // No room above the hand's marriage limit.
+  assert.equal(ai.chooseContractRaise({ ...view, contract: MAX }), null);
+  // A hand without marriages keeps the old ceiling of 120.
+  assert.equal(
+    ai.chooseContractRaise({
+      ...view,
+      contract: BIDDING.MAX,
+      players: view.players.map((player) => (player.id === 'alice'
+        ? {
+          ...player,
+          hand: ['SA', 'HA', 'DA', 'CA', 'S10', 'H10', 'D10', 'C10', 'S9', 'C9'],
+          cardCount: 10,
+        }
+        : player)),
+    }),
+    null,
+  );
+});
+
 test('AI decisions do not mutate the game state', () => {
   const game = createSeededGame(777);
   const ais = createAIs(777);

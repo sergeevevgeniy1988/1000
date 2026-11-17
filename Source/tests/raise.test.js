@@ -5,7 +5,7 @@ import { BIDDING, GAME_EVENTS, PHASES } from '../js/core/constants.js';
 import { GameError } from '../js/core/errors.js';
 import { scoreDeal } from '../js/core/scoring.js';
 import { createAI } from '../js/ai/ai.js';
-import { getRaiseOptions } from '../js/ui/raise.js';
+import { getRaiseOptions, isLegalRaiseAmount } from '../js/ui/raise.js';
 import {
   createAllNegativeBiddingGame,
   createFixedGame,
@@ -141,6 +141,23 @@ test('raise options cover every legal contract above the current one', () => {
   assert.deepEqual(getRaiseOptions(115), [120]);
   assert.deepEqual(getRaiseOptions(120), []);
   assert.deepEqual(getRaiseOptions(Number.NaN), []);
+});
+
+test('isLegalRaiseAmount accepts only steps above the contract up to the hand maximum', () => {
+  const bounds = { contract: 120, max: 300 };
+
+  assert.equal(isLegalRaiseAmount(125, bounds), true);
+  assert.equal(isLegalRaiseAmount(300, bounds), true);
+  assert.equal(isLegalRaiseAmount(305, bounds), false);
+  assert.equal(isLegalRaiseAmount(120, bounds), false);
+  assert.equal(isLegalRaiseAmount(80, bounds), false);
+  assert.equal(isLegalRaiseAmount(82, bounds), false);
+  assert.equal(isLegalRaiseAmount(130, { contract: 120, max: 120 }), false);
+  assert.equal(isLegalRaiseAmount(125.5, bounds), false);
+  assert.equal(isLegalRaiseAmount('125', bounds), false);
+  assert.equal(isLegalRaiseAmount(Number.NaN, bounds), false);
+  assert.equal(isLegalRaiseAmount(null, bounds), false);
+  assert.equal(isLegalRaiseAmount(125, {}), false);
 });
 
 test('the declarer raises the contract to 85, 100 or 120 exactly once', () => {

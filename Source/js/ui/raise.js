@@ -30,3 +30,26 @@ export function getRaiseOptions(contract) {
 
   return options;
 }
+
+/**
+ * Checks one contract raise amount. The maximum comes from `getMaxContract()`
+ * for the declarer's hand, so a raise may exceed `BIDDING.MAX` after the prikup.
+ *
+ * @param {unknown} amount
+ * @param {{ contract?: number, max?: number }} [bounds]
+ * @returns {boolean}
+ */
+export function isLegalRaiseAmount(amount, { contract, max } = {}) {
+  if (
+    typeof amount !== 'number'
+    || !Number.isInteger(amount)
+    || !Number.isFinite(contract)
+    || !Number.isFinite(max)
+  ) {
+    return false;
+  }
+
+  return amount % BIDDING.STEP === 0
+    && amount > contract
+    && amount <= max;
+}
