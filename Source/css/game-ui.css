@@ -91,6 +91,65 @@
   min-width: 64px;
 }
 
+/* Inline contract raise */
+
+.raise-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.raise-controls__info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 156px;
+}
+
+.raise-controls__title {
+  color: var(--color-gold-bright);
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  letter-spacing: 0.03em;
+}
+
+.raise-controls__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.raise-controls__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.raise-controls__input {
+  width: 92px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid rgba(229, 185, 92, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: rgba(4, 20, 14, 0.35);
+}
+
+.raise-controls__input:focus-visible {
+  outline: 2px solid rgba(245, 215, 140, 0.45);
+  outline-offset: 2px;
+}
+
 /* Bid speech bubbles */
 
 .speech-bubble {
@@ -972,6 +1031,15 @@ body.has-modal {
     gap: 6px 12px;
   }
 
+  .raise-controls {
+    gap: 6px 12px;
+  }
+
+  .raise-controls__input {
+    min-height: 34px;
+    font-size: 0.82rem;
+  }
+
   .bid-button {
     min-width: 50px;
     min-height: 34px;
@@ -1004,6 +1072,18 @@ body.has-modal {
     gap: 8px;
     align-items: baseline;
     justify-content: center;
+  }
+
+  .raise-controls__info {
+    min-width: 100%;
+    flex-direction: row;
+    gap: 8px;
+    align-items: baseline;
+    justify-content: center;
+  }
+
+  .raise-controls__actions {
+    width: 100%;
   }
 
   .gift-slots {

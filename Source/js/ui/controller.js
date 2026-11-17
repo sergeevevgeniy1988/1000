@@ -22,7 +22,8 @@ import {
   createMarriageMenu,
   createPendingMarriageStatus,
 } from './marriage.js';
-import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
+import { openGiftModal, openPrikupRevealModal } from './prikup.js';
+import { createRaiseControls } from './raise-panel.js';
 import { isLegalRaiseAmount } from './raise.js';
 import {
   closeModal,
@@ -818,22 +819,24 @@ export class Controller {
       }
       case PHASES.GIVING: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
-        const viewer = state.players.find((player) => player.id === viewerId);
         const declarerIsSelf = Boolean(declarer && declarer.id === viewerId);
+        const raiseWindowOpen = !state.raiseDecided && state.givenCards.length === 0;
         let statusText;
 
+        if (declarerIsSelf && raiseWindowOpen) {
+          // The raise decision lives in the action bar so the table and the
+          // declarer's ten-card hand stay visible while choosing an amount.
+          bar.append(createRaiseControls({
+            state,
+            viewerId,
+            onRaise: (amount) => this.#humanRaise(amount),
+            onDecline: () => this.#humanDeclineRaise(),
+          }));
+          break;
+        }
+
         if (!state.raiseDecided) {
-          if (declarerIsSelf) {
-            if (viewer && viewer.score < 0) {
-              statusText = 'Повышение недоступно: отрицательный счёт.';
-            } else if (state.contract >= BIDDING.MAX) {
-              statusText = 'Заказ максимальный: повышать некуда.';
-            } else {
-              statusText = 'Решите, повышать ли заказ, в окне повышения.';
-            }
-          } else {
-            statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
-          }
+          statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
         } else if (declarerIsSelf) {
           const opponents = state.players.filter((player) => player.id !== viewerId);
           const names = formatGenitiveNames(opponents.map((player) => player.name));
@@ -1197,8 +1200,11 @@ export class Controller {
     const viewerId = this.#getViewerId(state);
     const isHost = this.#session?.capabilities?.isHost === true;
     const kind = getOpenModalKind();
+    const giftModalOpen = state.phase === PHASES.GIVING
+      && state.declarerId === viewerId
+      && (state.raiseDecided === true || state.givenCards.length > 0);
     const mandatoryModal = state.phase === PHASES.PRIKUP
-      || (state.phase === PHASES.GIVING && state.declarerId === viewerId)
+      || giftModalOpen
       || state.phase === PHASES.DEAL_END
       || state.phase === PHASES.GAME_OVER;
 
@@ -1221,15 +1227,11 @@ export class Controller {
     }
 
     if (state.phase === PHASES.GIVING && state.declarerId === viewerId) {
-      if (!state.raiseDecided && state.givenCards.length === 0) {
-        if (kind !== 'raise') {
+      if (!giftModalOpen) {
+        // The raise window is inline in the action bar, so the reveal modal
+        // must not cover the declarer's hand while choosing an amount.
+        if (kind === 'prikup-reveal') {
           closeModal({ silent: true });
-          openRaiseModal({
-            state,
-            viewerId,
-            onRaise: (amount) => this.#humanRaise(amount),
-            onDecline: () => this.#humanDeclineRaise(),
-          });
         }
 
         return;
@@ -1277,7 +1279,6 @@ export class Controller {
     if (
       kind === 'prikup'
       || kind === 'prikup-reveal'
-      || kind === 'raise'
       || kind === 'results'
       || kind === 'gameover'
     ) {

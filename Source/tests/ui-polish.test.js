@@ -83,6 +83,10 @@ test('engine errors become short Russian messages without internal ids', () => {
     getActionErrorMessage({ code: 'RAISE_ALREADY_DECIDED' }),
     'Решение о повышении заказа уже принято.',
   );
+  assert.equal(
+    getActionErrorMessage({ code: 'INVALID_RAISE' }),
+    'Заказ можно повысить только до числа больше текущего, кратного 5 и не выше 120 плюс бонусы марьяжей на руке.',
+  );
   assert.match(getActionErrorMessage({ code: 'MARRIAGE_NOT_ALLOWED' }), /первой завершённой взятки/);
   assert.equal(
     getActionErrorMessage({ code: 'MARRIAGE_PENDING' }),
@@ -152,8 +156,45 @@ test('phase announcements include the final contract during gifts', () => {
       currentPlayerId: 'human',
       declarerId: 'human',
       contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Выберите по одной карте для Алисы и Бориса.',
+  );
+});
+
+test('phase announcements ask the human declarer to raise or keep the contract', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 85,
+      raiseDecided: false,
+    })),
+    'Отдар. Заказ — 85. Повысьте заказ или оставьте текущий, максимум — 120.',
+  );
+
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 120,
+      raiseDecided: false,
+      players: [
+        { id: 'alice', name: 'Алиса', isHuman: false, isAI: true },
+        { id: 'boris', name: 'Борис', isHuman: false, isAI: true },
+        {
+          id: 'human',
+          name: 'Вы',
+          isHuman: true,
+          isAI: false,
+          score: 0,
+          hand: ['HK', 'HQ', 'DK', 'DQ', 'SA', 'HA', 'DA', 'C10', 'S9', 'C9'],
+        },
+      ],
+    })),
+    'Отдар. Заказ — 120. Повысьте заказ или оставьте текущий, максимум — 300.',
   );
 });
 
@@ -248,6 +289,16 @@ test('announcements build gift names from the current players', () => {
       phase: PHASES.GIVING,
       declarerId: 'host',
       contract: 85,
+      raiseDecided: false,
+    })),
+    'Отдар. Заказ — 85. Повысьте заказ или оставьте текущий, максимум — 120.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      phase: PHASES.GIVING,
+      declarerId: 'host',
+      contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Выберите по одной карте для Анны и Бориса.',
   );
@@ -257,6 +308,7 @@ test('announcements build gift names from the current players', () => {
       phase: PHASES.GIVING,
       declarerId: 'host',
       contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Иван отдаёт карты соперникам.',
   );
@@ -408,4 +460,35 @@ test('guest UI gates actions, pending status and host-only controls', () => {
 
   assert.match(mainSource, /dispose\?\.\(\)/);
   assert.match(mainSource, /sessionclosed/);
+});
+
+test('the raise decision is inline in the action bar and no raise modal remains', () => {
+  const controllerSource = readFileSync(
+    new URL('../js/ui/controller.js', import.meta.url),
+    'utf8',
+  );
+  const prikupSource = readFileSync(
+    new URL('../js/ui/prikup.js', import.meta.url),
+    'utf8',
+  );
+  const panelSource = readFileSync(
+    new URL('../js/ui/raise-panel.js', import.meta.url),
+    'utf8',
+  );
+  const cssSource = readFileSync(
+    new URL('../css/game-ui.css', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(controllerSource, /from '\.\/raise-panel\.js'/);
+  assert.match(controllerSource, /createRaiseControls\(/);
+  assert.doesNotMatch(controllerSource, /openRaiseModal/);
+  assert.doesNotMatch(prikupSource, /openRaiseModal/);
+  assert.match(panelSource, /Повысить заказ\?/);
+  assert.match(panelSource, /Максимум = 120 \+ бонусы марьяжей на руке\./);
+  assert.match(panelSource, /aria-label': 'Новая сумма заказа'/);
+  assert.match(panelSource, /isLegalRaiseAmount/);
+  assert.match(cssSource, /\.raise-controls \{/);
+  assert.match(cssSource, /\.raise-controls__input/);
+  assert.match(cssSource, /\.raise-controls__hint/);
 });

@@ -1,8 +1,6 @@
 import { BIDDING } from '../core/constants.js';
 import { createElement } from './dom.js';
 
-export { getRaiseOptions } from './raise.js';
-
 /**
  * @typedef {import('../core/game.js').Game} Game
  */

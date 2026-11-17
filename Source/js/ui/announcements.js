@@ -1,4 +1,5 @@
 import { DEAL, PHASES } from '../core/constants.js';
+import { getMaxContract } from '../core/rules.js';
 import {
   formatGenitiveNames,
   formatPoints,
@@ -100,6 +101,13 @@ export function getPhaseAnnouncement(state, { humanId = null, reveal = null } = 
         : '';
 
       if (declarer && declarer.id === viewerId) {
+        if (state.raiseDecided !== true) {
+          const hand = Array.isArray(declarer.hand) ? declarer.hand : [];
+          const max = getMaxContract(hand);
+
+          return `Отдар.${contract} Повысьте заказ или оставьте текущий, максимум — ${max}.`;
+        }
+
         const opponents = state.players.filter((player) => player.id !== viewerId);
         const names = formatGenitiveNames(opponents.map((player) => player.name));
 
