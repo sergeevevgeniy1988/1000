@@ -13,7 +13,7 @@ import {
 } from '../js/ui/format.js';
 import { getGiftLogCardId } from '../js/ui/log.js';
 import { canViewerTakePrikup } from '../js/ui/prikup.js';
-import { shouldShowThinking } from '../js/ui/table.js';
+import { shouldShowThinking, getDealPoints } from '../js/ui/table.js';
 
 /**
  * @param {Partial<object>} [overrides]
@@ -532,4 +532,34 @@ test('the raise decision is inline in the action bar and no raise modal remains'
   assert.match(cssSource, /\.raise-controls \{/);
   assert.match(cssSource, /\.raise-controls__input/);
   assert.match(cssSource, /\.raise-controls__hint/);
+});
+
+test('deal points sum the trick and marriage points of the current deal', () => {
+  assert.equal(getDealPoints({ trickPoints: 0, marriagePoints: 0 }), 0);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: 40 }), 75);
+  assert.equal(getDealPoints({ trickPoints: 35 }), 35);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: null }), 35);
+  assert.equal(getDealPoints({}), 0);
+  assert.equal(getDealPoints(null), 0);
+  assert.equal(getDealPoints(undefined), 0);
+  assert.equal(getDealPoints({ trickPoints: '35', marriagePoints: 40 }), 40);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: Number.NaN }), 35);
+});
+
+test('player panels show the current deal score in playing and scoring phases', () => {
+  const tableSource = readFileSync(
+    new URL('../js/ui/table.js', import.meta.url),
+    'utf8',
+  );
+  const cssSource = readFileSync(
+    new URL('../css/components.css', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(tableSource, /export function getDealPoints/);
+  assert.match(tableSource, /В партии: \$\{dealPoints\}/);
+  assert.match(tableSource, /DEAL_SCORE_PHASES\.has\(state\.phase\)/);
+  assert.match(tableSource, /PHASES\.PLAYING[\s\S]*PHASES\.SCORING[\s\S]*PHASES\.DEAL_END[\s\S]*PHASES\.GAME_OVER/);
+  assert.match(cssSource, /\.deal-score \{/);
+  assert.match(cssSource, /white-space: nowrap/);
 });

@@ -209,9 +209,16 @@
 
 .score__label,
 .bolts__label,
-.card-count {
+.card-count,
+.deal-score {
   color: var(--color-text-muted);
   font-size: 0.72rem;
+}
+
+/* Deal points stay on one line and wrap to the next row in narrow panels. */
+.deal-score {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .score__value {
