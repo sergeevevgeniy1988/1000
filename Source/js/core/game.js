@@ -1054,6 +1054,7 @@ export class Game {
         id: player.id,
         name: player.name,
         isHuman: player.isHuman,
+        isAI: !player.isHuman,
         hand: handVisible ? player.hand.map((card) => card.id) : [],
         cardCount: player.hand.length,
         score: player.score,
@@ -1069,6 +1070,7 @@ export class Game {
     });
 
     return deepFreeze({
+      viewerId,
       phase: this.#phase,
       dealNumber: this.#dealNumber,
       targetScore: this.#targetScore,

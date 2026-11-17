@@ -6,6 +6,31 @@ import { getCardById } from '../core/deck.js';
  */
 
 /**
+ * Resolves the player whose seat the current snapshot belongs to. New
+ * snapshots carry `viewerId`; older fixtures without it fall back to an
+ * explicit id or to the single `isHuman` player.
+ *
+ * @param {object | null | undefined} state
+ * @param {string | null} [fallbackId]
+ * @returns {string | null}
+ */
+export function resolveViewerId(state, fallbackId = null) {
+  if (state && typeof state.viewerId === 'string' && state.viewerId.length > 0) {
+    return state.viewerId;
+  }
+
+  if (typeof fallbackId === 'string' && fallbackId.length > 0) {
+    return fallbackId;
+  }
+
+  const humanPlayers = Array.isArray(state?.players)
+    ? state.players.filter((player) => player?.isHuman === true)
+    : [];
+
+  return humanPlayers.length === 1 ? humanPlayers[0].id : null;
+}
+
+/**
  * Chooses the Russian plural form for a number.
  *
  * @param {number} count
@@ -231,4 +256,41 @@ export function nameDative(name) {
   }
 
   return `${name}у`;
+}
+
+/**
+ * @param {ReadonlyArray<string>} names
+ * @param {(name: string) => string} decline
+ * @returns {string}
+ */
+function joinDeclinedNames(names, decline) {
+  const forms = names
+    .filter((name) => typeof name === 'string' && name.length > 0)
+    .map(decline);
+
+  if (forms.length === 0) {
+    return '';
+  }
+
+  if (forms.length === 1) {
+    return forms[0];
+  }
+
+  return `${forms.slice(0, -1).join(', ')} и ${forms[forms.length - 1]}`;
+}
+
+/**
+ * @param {ReadonlyArray<string>} names
+ * @returns {string} For example "Анны и Бориса".
+ */
+export function formatGenitiveNames(names) {
+  return joinDeclinedNames(names, nameGenitive);
+}
+
+/**
+ * @param {ReadonlyArray<string>} names
+ * @returns {string} For example "Анне и Борису".
+ */
+export function formatDativeNames(names) {
+  return joinDeclinedNames(names, nameDative);
 }

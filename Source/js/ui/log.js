@@ -9,6 +9,7 @@ import {
   getSuitNameLower,
   isFeminineName,
   nameDative,
+  resolveViewerId,
 } from './format.js';
 
 const RED_SUITS = new Set(['D', 'H']);
@@ -25,21 +26,27 @@ function findPlayer(state, playerId) {
 /**
  * @param {object} state
  * @param {string} playerId
+ * @param {string | null} viewerId
  * @returns {string}
  */
-function playerName(state, playerId) {
+function playerName(state, playerId, viewerId) {
+  if (viewerId !== null && playerId === viewerId) {
+    return 'Вы';
+  }
+
   return findPlayer(state, playerId)?.name ?? 'Игрок';
 }
 
 /**
  * @param {object | null} player
+ * @param {string | null} viewerId
  * @param {string} masculine
  * @param {string} feminine
  * @param {string} plural
  * @returns {string}
  */
-function verbForPlayer(player, masculine, feminine, plural) {
-  if (player?.isHuman) {
+function verbForPlayer(player, viewerId, masculine, feminine, plural) {
+  if (player && viewerId !== null && player.id === viewerId) {
     return plural;
   }
 
@@ -150,14 +157,18 @@ export function createLogEntry(entry, state) {
     attrs: { 'aria-hidden': 'true' },
   });
   const text = createElement('p', { className: 'log-entry__text' });
+  const viewerId = resolveViewerId(state);
 
   switch (entry.type) {
     case 'dealstarted': {
-      addText(text, `Раздача ${entry.dealNumber}. Сдаёт ${playerName(state, entry.dealerId)}.`);
+      addText(
+        text,
+        `Раздача ${entry.dealNumber}. Сдаёт ${playerName(state, entry.dealerId, viewerId)}.`,
+      );
       break;
     }
     case 'bid': {
-      addText(text, `${playerName(state, entry.playerId)}: `);
+      addText(text, `${playerName(state, entry.playerId, viewerId)}: `);
       addStrong(text, entry.amount);
       break;
     }
@@ -166,14 +177,14 @@ export function createLogEntry(entry, state) {
         ? ' Пас автоматически: отрицательный счёт.'
         : ' Пас.';
 
-      addText(text, `${playerName(state, entry.playerId)}:${suffix}`);
+      addText(text, `${playerName(state, entry.playerId, viewerId)}:${suffix}`);
       break;
     }
     case 'prikuprevealed': {
       const player = findPlayer(state, entry.playerId);
-      const verb = verbForPlayer(player, 'раскрывает', 'раскрывает', 'раскрываете');
+      const verb = verbForPlayer(player, viewerId, 'раскрывает', 'раскрывает', 'раскрываете');
 
-      addText(text, `${playerName(state, entry.playerId)} ${verb} прикуп: `);
+      addText(text, `${playerName(state, entry.playerId, viewerId)} ${verb} прикуп: `);
 
       entry.cards.forEach((cardId, index) => {
         if (index > 0) {
@@ -188,19 +199,19 @@ export function createLogEntry(entry, state) {
     }
     case 'prikup': {
       const player = findPlayer(state, entry.playerId);
-      const verb = verbForPlayer(player, 'берёт', 'берёт', 'берёте');
+      const verb = verbForPlayer(player, viewerId, 'берёт', 'берёт', 'берёте');
 
       addText(
         text,
-        `${playerName(state, entry.playerId)} ${verb} прикуп — ${formatCards(entry.count)}.`,
+        `${playerName(state, entry.playerId, viewerId)} ${verb} прикуп — ${formatCards(entry.count)}.`,
       );
       break;
     }
     case 'contractraised': {
       const player = findPlayer(state, entry.playerId);
-      const verb = verbForPlayer(player, 'повышает', 'повышает', 'повышаете');
+      const verb = verbForPlayer(player, viewerId, 'повышает', 'повышает', 'повышаете');
 
-      addText(text, `${playerName(state, entry.playerId)} ${verb} заказ: `);
+      addText(text, `${playerName(state, entry.playerId, viewerId)} ${verb} заказ: `);
       addStrong(text, entry.previousContract);
       addText(text, ' → ');
       addStrong(text, entry.contract);
@@ -208,28 +219,35 @@ export function createLogEntry(entry, state) {
       break;
     }
     case 'gift': {
-      addText(text, `${playerName(state, entry.fromId)} отдаёт `);
+      const player = findPlayer(state, entry.fromId);
+      const verb = verbForPlayer(player, viewerId, 'отдаёт', 'отдаёт', 'отдаёте');
+
+      addText(text, `${playerName(state, entry.fromId, viewerId)} ${verb} `);
       text.append(createCardChip(entry.cardId));
-      addText(text, ` ${nameDative(playerName(state, entry.toId))}.`);
+
+      const receiverName = playerName(state, entry.toId, viewerId);
+
+      addText(text, ` ${nameDative(receiverName)}.`);
       break;
     }
     case 'marriage': {
       const player = findPlayer(state, entry.playerId);
-      const verb = verbForPlayer(player, 'объявил', 'объявила', 'объявили');
+      const verb = verbForPlayer(player, viewerId, 'объявил', 'объявила', 'объявили');
 
       addText(
         text,
-        `${playerName(state, entry.playerId)} ${verb} ${formatMarriage(entry.suit)} `
+        `${playerName(state, entry.playerId, viewerId)} ${verb} ${formatMarriage(entry.suit)} `
           + `(+${entry.value}). Козырь — ${getSuitNameLower(entry.suit)}.`,
       );
       break;
     }
     case 'cardplayed': {
       const player = findPlayer(state, entry.playerId);
+      const verb = verbForPlayer(player, viewerId, 'кладёт', 'кладёт', 'кладёте');
 
       addText(
         text,
-        `${playerName(state, entry.playerId)} ${player?.isHuman ? 'кладёте' : 'кладёт'} `,
+        `${playerName(state, entry.playerId, viewerId)} ${verb} `,
       );
       text.append(createCardChip(entry.cardId));
       addText(text, '.');
@@ -237,9 +255,9 @@ export function createLogEntry(entry, state) {
     }
     case 'trickwon': {
       const player = findPlayer(state, entry.winnerId);
-      const verb = verbForPlayer(player, 'взял', 'взяла', 'взяли');
+      const verb = verbForPlayer(player, viewerId, 'взял', 'взяла', 'взяли');
 
-      addText(text, `${playerName(state, entry.winnerId)} ${verb} взятку: `);
+      addText(text, `${playerName(state, entry.winnerId, viewerId)} ${verb} взятку: `);
       addStrong(text, entry.points);
       addText(text, '.');
       break;
@@ -248,24 +266,30 @@ export function createLogEntry(entry, state) {
       addText(
         text,
         `Заказ ${entry.contract}: ${entry.contractMet ? 'выполнен' : 'не выполнен'}. `
-          + `Играющий — ${playerName(state, entry.declarerId)}.`,
+          + `Играющий — ${playerName(state, entry.declarerId, viewerId)}.`,
       );
 
       if (entry.boltsAwarded?.length > 0) {
-        addText(text, ` Болт: ${entry.boltsAwarded.map((id) => playerName(state, id)).join(', ')}.`);
+        addText(
+          text,
+          ` Болт: ${entry.boltsAwarded.map((id) => playerName(state, id, viewerId)).join(', ')}.`,
+        );
       }
 
       if (entry.boltsReset?.length > 0) {
         addText(
           text,
-          ` Третий болт: ${entry.boltsReset.map((id) => playerName(state, id)).join(', ')} (−120).`,
+          ` Третий болт: ${entry.boltsReset.map((id) => playerName(state, id, viewerId)).join(', ')} (−120).`,
         );
       }
 
       break;
     }
     case 'gameover': {
-      addText(text, `Игра окончена. Победитель — ${playerName(state, entry.winnerId)}.`);
+      addText(
+        text,
+        `Игра окончена. Победитель — ${playerName(state, entry.winnerId, viewerId)}.`,
+      );
       break;
     }
     default: {
@@ -296,7 +320,7 @@ export function resetLog(logEl) {
 export function renderLog(state, logEl) {
   const parsed = Number.parseInt(logEl.dataset.renderedCount ?? '0', 10);
   const renderedCount = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  const entries = state.log;
+  const entries = Array.isArray(state?.log) ? state.log : [];
 
   if (entries.length < renderedCount) {
     resetLog(logEl);

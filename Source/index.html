@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b2b20">
-  <meta name="description" content="«Тысяча» — карточная игра на троих против двух AI-соперников.">
+  <meta name="description" content="«Тысяча» — карточная игра на троих: локально против двух AI-соперников или по локальной сети с друзьями.">
   <title>1000 — Тысяча</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/reset.css">
@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="css/game-ui.css">
   <link rel="stylesheet" href="css/content.css">
   <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/network.css">
 </head>
 <body>
   <div class="app">
@@ -45,6 +46,7 @@
         >Журнал</button>
         <button class="button button--ghost" type="button" id="rules">Правила</button>
         <button class="button button--ghost" type="button" id="settings">Настройки</button>
+        <button class="button button--ghost" type="button" id="network">Сетевая игра</button>
         <button class="button" type="button" id="new-game">Новая игра</button>
       </div>
     </header>
@@ -74,7 +76,7 @@
     </main>
 
     <footer class="app-footer">
-      <span>Локальная игра без подключения к сети</span>
+      <span>Версия 1.2.0 · локальная игра или сеть по локальной сети</span>
       <span aria-hidden="true">♠ ♥ ♦ ♣</span>
     </footer>
   </div>

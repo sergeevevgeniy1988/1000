@@ -7,6 +7,7 @@ import {
   formatScore,
   formatSignedScore,
   formatTricks,
+  resolveViewerId,
 } from './format.js';
 
 let currentModal = null;
@@ -369,6 +370,7 @@ function createCell(value, label = '') {
  * @returns {HTMLElement}
  */
 function createDealResultTable(state, result) {
+  const viewerId = resolveViewerId(state);
   const wrapper = createElement('div', { className: 'result-table-wrap' });
   const table = createElement('table', { className: 'result-table' });
   const head = createElement('thead');
@@ -389,7 +391,7 @@ function createDealResultTable(state, result) {
     const row = createElement('tr', {
       className: [
         playerResult.isDeclarer ? 'result-row--declarer' : '',
-        player?.isHuman ? 'result-row--human' : '',
+        player && player.id === viewerId ? 'result-row--human' : '',
       ].filter(Boolean),
     });
     const nameCell = createElement('th', {
@@ -626,16 +628,20 @@ function createFinalTable(state) {
  * @param {object} state
  * @param {object} options
  * @param {() => void} options.onNewGame
+ * @param {boolean} [options.isHost] Only the host may start a new game.
+ * @param {(() => void) | null} [options.onLeave]
  * @returns {{ element: HTMLElement, close: () => void } | null}
  */
-export function openGameOverModal(state, { onNewGame }) {
+export function openGameOverModal(state, { onNewGame, isHost = true, onLeave = null }) {
+  const viewerId = resolveViewerId(state);
   const winner = findPlayer(state, state.winnerId);
-  const human = state.players.find((player) => player.isHuman) ?? null;
+  const viewer = viewerId === null ? null : findPlayer(state, viewerId);
+  const winnerIsViewer = winner !== null && winner.id === viewerId;
   const body = createElement('div', { className: 'game-over' });
   const hero = createElement('div', {
     className: [
       'game-over__hero',
-      winner?.isHuman ? 'game-over__hero--human' : '',
+      winnerIsViewer ? 'game-over__hero--human' : '',
     ].filter(Boolean),
   });
 
@@ -646,14 +652,14 @@ export function openGameOverModal(state, { onNewGame }) {
     }),
     createElement('h3', {
       className: 'game-over__title',
-      text: winner?.isHuman ? 'Вы победили!' : `Победа: ${winner?.name ?? '—'}`,
+      text: winnerIsViewer ? 'Вы победили!' : `Победа: ${winner?.name ?? '—'}`,
     }),
     createElement('p', {
       className: 'game-over__text',
-      text: winner?.isHuman
+      text: winnerIsViewer
         ? `Партия завершена за ${formatDeals(state.dealNumber)}.`
         : `Партия завершена за ${formatDeals(state.dealNumber)}. Ваш счёт — ${formatScore(
-          human?.score ?? 0,
+          viewer?.score ?? 0,
         )}.`,
     }),
   );
@@ -661,15 +667,36 @@ export function openGameOverModal(state, { onNewGame }) {
   body.append(hero, createFinalTable(state));
 
   const footer = createElement('div', { className: 'modal__footer-row' });
-  const newGameButton = createElement('button', {
-    className: 'button',
-    text: 'Новая игра',
-    attrs: { type: 'button', 'data-autofocus': 'true' },
-    dataset: { action: 'new-game' },
-  });
 
-  newGameButton.addEventListener('click', onNewGame);
-  footer.append(newGameButton);
+  if (isHost !== false) {
+    const newGameButton = createElement('button', {
+      className: 'button',
+      text: 'Новая игра',
+      attrs: { type: 'button', 'data-autofocus': 'true' },
+      dataset: { action: 'new-game' },
+    });
+
+    newGameButton.addEventListener('click', onNewGame);
+    footer.append(newGameButton);
+  } else {
+    footer.append(createElement('p', {
+      className: 'game-over__wait',
+      text: 'Ждём, пока хост начнёт новую игру.',
+      attrs: { role: 'status' },
+    }));
+
+    if (typeof onLeave === 'function') {
+      const leaveButton = createElement('button', {
+        className: 'button button--ghost',
+        text: 'Выйти',
+        attrs: { type: 'button', 'data-autofocus': 'true' },
+        dataset: { action: 'leave-network' },
+      });
+
+      leaveButton.addEventListener('click', onLeave);
+      footer.append(leaveButton);
+    }
+  }
 
   const modal = openModal({
     kind: 'gameover',
@@ -752,6 +779,63 @@ export function openConfirmNewGameModal({ onConfirm, onCancel }) {
   return openModal({
     kind: 'confirm',
     title: 'Новая игра?',
+    body,
+    footer,
+    dismissible: true,
+    className: 'modal--confirm',
+    onClose: onCancel,
+  });
+}
+
+/**
+ * Opens the confirmation dialog for leaving a network game. The host closes
+ * the room for everyone; a guest only frees their own seat.
+ *
+ * @param {object} options
+ * @param {boolean} [options.isHost]
+ * @param {() => void} [options.onConfirm]
+ * @param {() => void} [options.onCancel]
+ * @returns {{ element: HTMLElement, close: () => void } | null}
+ */
+export function openConfirmNetworkExitModal({ isHost = false, onConfirm, onCancel } = {}) {
+  const body = createElement('div', { className: 'confirm' });
+
+  body.append(
+    createElement('p', {
+      className: 'confirm__text',
+      text: isHost
+        ? 'Комната будет закрыта для всех игроков. Гости вернутся в локальную игру.'
+        : 'Вы выйдете из сетевой игры и вернётесь в локальную партию.',
+    }),
+    createElement('p', {
+      className: 'confirm__note',
+      text: 'Текущая сетевая партия не сохранится.',
+    }),
+  );
+
+  const footer = createElement('div', { className: 'modal__footer-row' });
+  const cancelButton = createElement('button', {
+    className: 'button button--ghost',
+    text: 'Продолжить игру',
+    attrs: { type: 'button', 'data-autofocus': 'true' },
+    dataset: { action: 'cancel-network-exit' },
+  });
+  const confirmButton = createElement('button', {
+    className: 'button',
+    text: isHost ? 'Завершить сетевую игру' : 'Выйти',
+    attrs: { type: 'button' },
+    dataset: { action: 'confirm-network-exit' },
+  });
+
+  cancelButton.addEventListener('click', () => closeModal());
+  confirmButton.addEventListener('click', () => {
+    onConfirm?.();
+  });
+  footer.append(cancelButton, confirmButton);
+
+  return openModal({
+    kind: 'confirm-network-exit',
+    title: isHost ? 'Завершить сетевую игру?' : 'Выйти из сетевой игры?',
     body,
     footer,
     dismissible: true,

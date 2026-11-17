@@ -41,20 +41,20 @@ export function createMarriageButton({ available, onOpen }) {
  * @param {object} options
  * @param {string} options.suit Declared marriage suit.
  * @param {string} options.playerName Name of the declaring player.
- * @param {boolean} options.isHuman Whether the current human owns the pending marriage.
+ * @param {boolean} options.isSelf Whether the viewer owns the pending marriage.
  * @param {(() => void) | null} options.onCancel Cancel handler for the owner.
  * @returns {HTMLElement}
  */
 export function createPendingMarriageStatus({
   suit,
   playerName,
-  isHuman,
+  isSelf,
   onCancel,
 }) {
   const wrapper = createElement('div', {
     className: ['action-bar__group', 'marriage-pending'],
   });
-  const text = isHuman
+  const text = isSelf
     ? `Марьяж: ${getSuitNameLower(suit)}. Выйдите королём или дамой`
     : `Марьяж: ${getSuitNameLower(suit)}. ${playerName} выходит королём или дамой`;
 

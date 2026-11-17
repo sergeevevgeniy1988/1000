@@ -9,6 +9,7 @@ import {
   getPhaseName,
   getSuitNameLower,
   nameGenitive,
+  resolveViewerId,
 } from './format.js';
 
 const ACTING_PHASES = new Set([
@@ -34,6 +35,35 @@ function findPlayer(state, playerId) {
  */
 function isActing(state, player) {
   return ACTING_PHASES.has(state.phase) && state.currentPlayerId === player.id;
+}
+
+/**
+ * Only an AI seat that is currently acting shows the "думает" indicator. Live
+ * players, including disconnected guests, never do.
+ *
+ * @param {object | null | undefined} player
+ * @param {object | null | undefined} state
+ * @returns {boolean}
+ */
+export function shouldShowThinking(player, state) {
+  return Boolean(
+    player
+    && state
+    && player.isAI && isActing(state, player),
+  );
+}
+
+/**
+ * @param {object} state
+ * @param {string} playerId
+ * @returns {object | null}
+ */
+function getPresence(state, playerId) {
+  if (!Array.isArray(state?.network?.presence)) {
+    return null;
+  }
+
+  return state.network.presence.find((seat) => seat?.playerId === playerId) ?? null;
 }
 
 /**
@@ -63,9 +93,10 @@ function createStatusChip(text, variant) {
 /**
  * @param {object} state
  * @param {object} player
+ * @param {string | null} viewerId
  * @returns {HTMLElement | null}
  */
-function createStatus(state, player) {
+function createStatus(state, player, viewerId) {
   if (player.isDeclarer && state.contract !== null) {
     return createStatusChip(`Заказ ${state.contract}`, 'contract');
   }
@@ -80,7 +111,7 @@ function createStatus(state, player) {
     }
 
     if (isActing(state, player)) {
-      return createStatusChip(player.isHuman ? 'Ваш ход' : 'Ждёт ответа', 'turn');
+      return createStatusChip(player.id === viewerId ? 'Ваш ход' : 'Ждёт ответа', 'turn');
     }
 
     return createStatusChip('Ждёт', 'idle');
@@ -146,13 +177,16 @@ function createBolts(state, player) {
  *
  * @param {object} state
  * @param {object} player
+ * @param {string | null} [viewerId]
  * @returns {HTMLElement}
  */
-export function createPlayerPanel(state, player) {
+export function createPlayerPanel(state, player, viewerId = null) {
+  const resolvedViewerId = viewerId ?? resolveViewerId(state);
+  const isSelf = player.id === resolvedViewerId;
   const panel = createElement('article', {
     className: [
       'player-card',
-      player.isHuman ? 'player-card--human' : '',
+      isSelf ? 'player-card--human' : '',
       isActing(state, player) ? 'player-card--active' : '',
     ],
     attrs: {
@@ -184,6 +218,12 @@ export function createPlayerPanel(state, player) {
     badges.append(createBadge('Играющий', 'declarer'));
   }
 
+  const presence = getPresence(state, player.id);
+
+  if (presence && presence.occupied === true && presence.connected !== true) {
+    badges.append(createBadge('нет связи', 'offline'));
+  }
+
   const stats = createElement('div', { className: 'player-card__stats' });
   const score = createElement('div', { className: 'score' });
 
@@ -199,13 +239,13 @@ export function createPlayerPanel(state, player) {
   );
 
   const statusRow = createElement('div', { className: 'player-card__status' });
-  const status = createStatus(state, player);
+  const status = createStatus(state, player, resolvedViewerId);
 
   if (status) {
     statusRow.append(status);
   }
 
-  if (!player.isHuman && isActing(state, player)) {
+  if (shouldShowThinking(player, state)) {
     statusRow.append(createThinkingIndicator());
   }
 
@@ -217,7 +257,7 @@ export function createPlayerPanel(state, player) {
 
   panel.append(avatar, body);
 
-  if (!player.isHuman && player.cardCount > 0) {
+  if (!isSelf && player.cardCount > 0) {
     const handRow = createElement('div', { className: 'player-card__hand' });
     handRow.append(createOpponentHand(player.cardCount));
     panel.append(handRow);
@@ -229,17 +269,20 @@ export function createPlayerPanel(state, player) {
 /**
  * @param {object} state
  * @param {object} player
+ * @param {string | null} viewerId
  * @returns {'left' | 'right' | 'bottom' | 'center'}
  */
-function getSeatPosition(state, player) {
-  const human = state.players.find((entry) => entry.isHuman);
+function getSeatPosition(state, player, viewerId) {
+  const self = viewerId === null
+    ? null
+    : state.players.find((entry) => entry.id === viewerId) ?? null;
 
-  if (human) {
-    if (human.id === player.id) {
+  if (self) {
+    if (self.id === player.id) {
       return 'bottom';
     }
 
-    const opponents = state.players.filter((entry) => !entry.isHuman);
+    const opponents = state.players.filter((entry) => entry.id !== self.id);
 
     if (opponents[0]?.id === player.id) {
       return 'left';
@@ -262,6 +305,7 @@ function getSeatPosition(state, player) {
  * @param {object} [options]
  * @param {string | null} [options.animatedCardId]
  * @param {string | null} [options.winnerId]
+ * @param {string | null} [options.viewerId]
  * @returns {HTMLElement}
  */
 function createTrickSlot(state, player, options = {}) {
@@ -270,7 +314,7 @@ function createTrickSlot(state, player, options = {}) {
   const slot = createElement('div', {
     className: [
       'trick-slot',
-      `trick-slot--${getSeatPosition(state, player)}`,
+      `trick-slot--${getSeatPosition(state, player, options.viewerId ?? null)}`,
       isWinner ? 'trick-slot--winner' : '',
     ].filter(Boolean),
     dataset: { playerId: player.id },
@@ -302,28 +346,29 @@ function createTrickSlot(state, player, options = {}) {
 
 /**
  * @param {object} state
+ * @param {string | null} viewerId
  * @returns {string}
  */
-function getCenterPhaseLabel(state) {
+function getCenterPhaseLabel(state, viewerId) {
   const actor = findPlayer(state, state.currentPlayerId);
   const declarer = findPlayer(state, state.declarerId);
 
   switch (state.phase) {
     case PHASES.BIDDING:
       if (actor) {
-        return actor.isHuman
+        return actor.id === viewerId
           ? 'Торги · ваш ход'
           : `Торги · ход ${nameGenitive(actor.name)}`;
       }
 
       return 'Торги';
     case PHASES.PRIKUP:
-      return declarer && !declarer.isHuman ? `Прикуп · ${declarer.name}` : 'Прикуп';
+      return declarer && declarer.id !== viewerId ? `Прикуп · ${declarer.name}` : 'Прикуп';
     case PHASES.GIVING:
-      return declarer && !declarer.isHuman ? `Отдар · ${declarer.name}` : 'Отдар';
+      return declarer && declarer.id !== viewerId ? `Отдар · ${declarer.name}` : 'Отдар';
     case PHASES.PLAYING:
       if (actor) {
-        return actor.isHuman ? 'Ваш ход' : `Ход ${nameGenitive(actor.name)}`;
+        return actor.id === viewerId ? 'Ваш ход' : `Ход ${nameGenitive(actor.name)}`;
       }
 
       return 'Розыгрыш';
@@ -405,16 +450,18 @@ function createContractIndicator(state) {
  * @param {object} [options]
  * @param {string | null} [options.animatedCardId]
  * @param {string | null} [options.winnerId]
+ * @param {string | null} [options.viewerId]
  * @returns {HTMLElement}
  */
 export function createTableCenter(state, options = {}) {
+  const viewerId = options.viewerId ?? resolveViewerId(state);
   const inner = createElement('div', { className: 'table-center__inner' });
   const status = createElement('div', { className: 'center-status' });
 
   status.append(
     createElement('span', {
       className: 'phase-banner',
-      text: getCenterPhaseLabel(state),
+      text: getCenterPhaseLabel(state, viewerId),
     }),
     createElement('span', {
       className: 'trick-counter',
@@ -438,7 +485,7 @@ export function createTableCenter(state, options = {}) {
   });
 
   for (const player of state.players) {
-    trick.append(createTrickSlot(state, player, options));
+    trick.append(createTrickSlot(state, player, { ...options, viewerId }));
   }
 
   const meta = createElement('div', { className: 'center-meta' });
@@ -459,15 +506,17 @@ export function createTableCenter(state, options = {}) {
  * @param {object} [options]
  * @param {string | null} [options.animatedCardId]
  * @param {string | null} [options.winnerId]
+ * @param {string | null} [options.viewerId]
  */
 export function renderTable(state, elements, options = {}) {
   const { opponents, humanPanel, tableCenter } = elements;
-  const human = state.players.find((player) => player.isHuman) ?? state.players[0];
-  const otherPlayers = state.players.filter((player) => player.id !== human.id);
+  const viewerId = options.viewerId ?? resolveViewerId(state);
+  const self = (viewerId === null ? null : findPlayer(state, viewerId)) ?? state.players[0];
+  const otherPlayers = state.players.filter((player) => player.id !== self.id);
 
   opponents.replaceChildren(
-    ...otherPlayers.map((player) => createPlayerPanel(state, player)),
+    ...otherPlayers.map((player) => createPlayerPanel(state, player, self.id)),
   );
-  humanPanel.replaceChildren(createPlayerPanel(state, human));
-  tableCenter.replaceChildren(createTableCenter(state, options));
+  humanPanel.replaceChildren(createPlayerPanel(state, self, self.id));
+  tableCenter.replaceChildren(createTableCenter(state, { ...options, viewerId: self.id }));
 }

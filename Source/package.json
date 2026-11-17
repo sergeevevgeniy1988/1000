@@ -1,6 +1,6 @@
 {
   "name": "thousand-game",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Браузерная карточная игра «Тысяча»",
   "type": "module",
