@@ -251,6 +251,36 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   ]);
   assert.deepEqual(getStatePlayer(game.getPlayerView('boris'), 'boris').hand.includes('S9'), true);
 
+  const giftLog = nextState.log.find((entry) => entry.type === 'gift');
+
+  assert.deepEqual(giftLog, {
+    fromId: 'alice',
+    toId: 'boris',
+    type: 'gift',
+    dealNumber: 1,
+  });
+  assert.equal(Object.hasOwn(giftLog, 'cardId'), false, 'the public log must hide the gifted card');
+  assert.deepEqual(game.getPlayerView('alice').givenCards, [
+    { fromId: 'alice', toId: 'boris', cardId: 'S9' },
+  ]);
+  assert.deepEqual(game.getPlayerView('boris').givenCards, [
+    { fromId: 'alice', toId: 'boris', cardId: 'S9' },
+  ]);
+  assert.deepEqual(game.getPlayerView('human').givenCards, [
+    { fromId: 'alice', toId: 'boris', cardId: null },
+  ]);
+
+  for (const view of [
+    nextState,
+    game.getPlayerView('alice'),
+    game.getPlayerView('boris'),
+    game.getPlayerView('human'),
+  ]) {
+    for (const entry of view.log.filter((item) => item.type === 'gift')) {
+      assert.equal(Object.hasOwn(entry, 'cardId'), false);
+    }
+  }
+
   expectError(() => game.giveCard('boris', 'CJ'), 'TARGET_ALREADY_RECEIVED');
   expectError(() => game.giveCard('human', 'S9'), 'CARD_NOT_IN_HAND');
 
@@ -268,6 +298,15 @@ test('the declarer takes the prikup and must give exactly one card to each oppon
   assert.equal(allIds.length, 24);
   assert.equal(new Set(allIds).size, 24);
   assert.deepEqual(getStatePlayer(game.getPlayerView('human'), 'alice').hand, []);
+
+  assert.deepEqual(game.getPlayerView('boris').givenCards, [
+    { fromId: 'alice', toId: 'boris', cardId: 'S9' },
+    { fromId: 'alice', toId: 'human', cardId: null },
+  ]);
+  assert.deepEqual(game.getPlayerView('human').givenCards, [
+    { fromId: 'alice', toId: 'boris', cardId: null },
+    { fromId: 'alice', toId: 'human', cardId: 'CJ' },
+  ]);
 
   expectError(() => game.giveCard('human', 'C10'), 'INVALID_PHASE');
 });

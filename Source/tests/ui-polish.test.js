@@ -11,6 +11,7 @@ import {
   formatGenitiveNames,
   resolveViewerId,
 } from '../js/ui/format.js';
+import { getGiftLogCardId } from '../js/ui/log.js';
 import { canViewerTakePrikup } from '../js/ui/prikup.js';
 import { shouldShowThinking } from '../js/ui/table.js';
 
@@ -327,6 +328,46 @@ test('announcements build gift names from the current players', () => {
     })),
     'Прикуп раскрыт всем игрокам. Иван забирает карты.',
   );
+});
+
+test('gift log entries show the card only to the giver and the receiver', () => {
+  const entry = {
+    type: 'gift',
+    fromId: 'alice',
+    toId: 'boris',
+    dealNumber: 2,
+  };
+  const gift = { fromId: 'alice', toId: 'boris', cardId: 'HQ' };
+
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 2,
+    givenCards: [gift],
+  })), 'HQ');
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'boris',
+    dealNumber: 2,
+    givenCards: [gift],
+  })), 'HQ');
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'human',
+    dealNumber: 2,
+    givenCards: [{ fromId: 'alice', toId: 'boris', cardId: null }],
+  })), null);
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 3,
+    givenCards: [gift],
+  })), null);
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 2,
+    givenCards: [],
+  })), null);
+  assert.equal(getGiftLogCardId({ type: 'bid', dealNumber: 2 }, createState({
+    dealNumber: 2,
+    givenCards: [gift],
+  })), null);
 });
 
 test('viewer resolution and name lists keep the "Вы" forms', () => {
