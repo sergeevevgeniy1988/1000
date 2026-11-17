@@ -112,6 +112,22 @@ async function stopServer(child) {
   });
 }
 
+function waitForExit(child, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null) {
+      resolve(child.exitCode);
+      return;
+    }
+
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+}
+
 async function waitForHealth(origin, child, getOutput) {
   const deadline = Date.now() + 20000;
 
@@ -438,6 +454,7 @@ test('publish stores per-player views, log and targeted messages with deltas', {
   assert.equal(publish.json.log[0].seq, 1);
   assert.equal(publish.json.messages.alice.length, 1);
   assert.equal(publish.json.messages.alice[0].seq, 1);
+  assert.equal(publish.text.includes(host.token), false, 'publish must not echo the host token');
 
   const firstPoll = await api(
     `/api/rooms/${host.roomCode}/player?viewSince=0&logSince=0&logEpoch=0&messageSince=0`,
@@ -453,6 +470,9 @@ test('publish stores per-player views, log and targeted messages with deltas', {
   assert.equal(firstPoll.json.log[0].entry.text, 'Deal 1');
   assert.equal(firstPoll.json.messages.length, 1);
   assert.equal(firstPoll.json.messages[0].payload.code, 'welcome');
+  assert.equal(firstPoll.text.includes(guest.token), false, 'player polls must not echo tokens');
+  assert.equal(firstPoll.text.includes(host.token), false, 'player polls must not echo foreign tokens');
+  assert.equal(firstPoll.text.includes(boris.token), false, 'player polls must not echo foreign tokens');
 
   const hostPlayerPoll = await api(
     `/api/rooms/${host.roomCode}/player?viewSince=0&logSince=0&logEpoch=0&messageSince=0`,
@@ -824,6 +844,59 @@ test('Host, Origin and CORS checks reject foreign requests', { skip: !isWindows 
     false,
   );
 });
+
+test('room tokens are accepted only from X-Room-Token, never from the query string', { skip: !isWindows }, async () => {
+  const host = await createRoom('Host');
+  const guest = await joinRoom(host.roomCode, 'Guest');
+
+  const queryOnly = await api(`/api/rooms/${host.roomCode}/host?actionSince=0&token=${host.token}`);
+
+  assert.equal(queryOnly.status, 401);
+  assert.equal(queryOnly.json.error, 'missing_token');
+
+  const queryPlayer = await api(
+    `/api/rooms/${host.roomCode}/player?viewSince=0&logSince=0&logEpoch=0&messageSince=0&token=${guest.token}`,
+  );
+
+  assert.equal(queryPlayer.status, 401);
+  assert.equal(queryPlayer.json.error, 'missing_token');
+
+  const queryAction = await api(
+    `/api/rooms/${host.roomCode}/action?token=${guest.token}`,
+    {
+      method: 'POST',
+      body: { actionId: 'query-token', type: 'bid', payload: { amount: 80 } },
+    },
+  );
+
+  assert.equal(queryAction.status, 401);
+  assert.equal(queryAction.json.error, 'missing_token');
+  assert.equal(
+    (await api(`/api/rooms/${host.roomCode}/host?actionSince=0`, { token: host.token })).json.actions.length,
+    0,
+    'a query token must not enqueue anything',
+  );
+});
+
+test('LAN mode refuses a public bind address instead of listening on it', { skip: !isWindows }, async () => {
+  const port = await findFreePort();
+  const started = startServerProcess([
+    '-Lan',
+    '-BindAddress',
+    '8.8.8.8',
+    '-Port',
+    String(port),
+    '-NoBrowser',
+  ]);
+  const code = await waitForExit(started.child);
+
+  assert.equal(code, 1);
+  assert.match(
+    started.getOutput(),
+    /not a private IPv4 address|Public bind addresses are refused/i,
+  );
+});
+
 
 test('room limit opens at most eight rooms', { skip: !isWindows }, async () => {
   for (let index = 0; index < 8; index += 1) {

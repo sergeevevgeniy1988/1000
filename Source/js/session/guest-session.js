@@ -41,6 +41,30 @@ function defaultSleep(milliseconds) {
 }
 
 /**
+ * Browser-safe timer wrapper. Native timers throw `TypeError: Illegal
+ * invocation` when they receive a receiver other than the global object, and
+ * `this.#setTimer(...)` would pass the session instance as the receiver. The
+ * wrapper drops the receiver and calls the global timer as a plain function.
+ *
+ * @param {() => void} callback
+ * @param {number} milliseconds
+ * @returns {unknown}
+ */
+function defaultSetTimer(callback, milliseconds) {
+  return setTimeout(callback, milliseconds);
+}
+
+/**
+ * Browser-safe counterpart of {@link defaultSetTimer}.
+ *
+ * @param {unknown} timer
+ * @returns {void}
+ */
+function defaultClearTimer(timer) {
+  clearTimeout(timer);
+}
+
+/**
  * Network guest session. It polls the relay for the seat's personal player
  * view, merges public-log and targeted-message deltas, replays the semantic
  * events the UI needs and posts guest actions with a stable `actionId`.
@@ -108,8 +132,8 @@ export class GuestSession {
     name = '',
     pollIntervalMs = POLL_INTERVAL_MS,
     continuous = false,
-    setTimer = setTimeout,
-    clearTimer = clearTimeout,
+    setTimer = defaultSetTimer,
+    clearTimer = defaultClearTimer,
     sleep = defaultSleep,
     actionRetryAttempts = GUEST_ACTION_RETRY_ATTEMPTS,
     actionRetryBaseDelayMs = RETRY_BASE_DELAY_MS,
@@ -138,8 +162,12 @@ export class GuestSession {
     this.#name = typeof name === 'string' ? name : '';
     this.#pollIntervalMs = Math.max(50, pollIntervalMs);
     this.#continuous = continuous === true;
-    this.#setTimer = setTimer;
-    this.#clearTimer = clearTimer;
+    this.#setTimer = typeof setTimer === 'function'
+      ? (callback, milliseconds) => setTimer(callback, milliseconds)
+      : defaultSetTimer;
+    this.#clearTimer = typeof clearTimer === 'function'
+      ? (timer) => clearTimer(timer)
+      : defaultClearTimer;
     this.#sleep = typeof sleep === 'function' ? sleep : defaultSleep;
     this.#actionRetryAttempts = Math.max(1, actionRetryAttempts);
     this.#actionRetryBaseDelayMs = Math.max(0, actionRetryBaseDelayMs);

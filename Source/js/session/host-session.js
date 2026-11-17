@@ -18,6 +18,30 @@ import {
 } from '../net/protocol.js';
 import { LocalSession } from './local-session.js';
 
+/**
+ * Browser-safe timer wrapper. Native timers throw `TypeError: Illegal
+ * invocation` when they receive a receiver other than the global object, and
+ * `this.#setTimer(...)` would pass the session instance as the receiver. The
+ * wrapper drops the receiver and calls the global timer as a plain function.
+ *
+ * @param {() => void} callback
+ * @param {number} milliseconds
+ * @returns {unknown}
+ */
+function defaultSetTimer(callback, milliseconds) {
+  return setTimeout(callback, milliseconds);
+}
+
+/**
+ * Browser-safe counterpart of {@link defaultSetTimer}.
+ *
+ * @param {unknown} timer
+ * @returns {void}
+ */
+function defaultClearTimer(timer) {
+  clearTimeout(timer);
+}
+
 /** Fixed clockwise seating order used by the network host. */
 export const HOST_SEAT_ORDER = Object.freeze(['alice', 'boris', 'human']);
 
@@ -165,8 +189,8 @@ export class HostSession {
     actionPollIntervalMs = HOST_ACTION_POLL_INTERVAL_MS,
     autoPoll = true,
     autoPublish = true,
-    setTimer = setTimeout,
-    clearTimer = clearTimeout,
+    setTimer = defaultSetTimer,
+    clearTimer = defaultClearTimer,
   } = {}) {
     if (
       !relay
@@ -194,8 +218,12 @@ export class HostSession {
     this.#actionPollIntervalMs = Math.max(0, actionPollIntervalMs);
     this.#autoPoll = autoPoll !== false;
     this.#autoPublish = autoPublish !== false;
-    this.#setTimer = setTimer;
-    this.#clearTimer = clearTimer;
+    this.#setTimer = typeof setTimer === 'function'
+      ? (callback, milliseconds) => setTimer(callback, milliseconds)
+      : defaultSetTimer;
+    this.#clearTimer = typeof clearTimer === 'function'
+      ? (timer) => clearTimer(timer)
+      : defaultClearTimer;
     this.#local = new LocalSession({
       players: this.#players,
       humanId: HOST_HOST_ID,

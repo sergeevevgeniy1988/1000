@@ -581,6 +581,71 @@ function createFakeTimers() {
 }
 
 /**
+ * Replaces the global timers with browser-like functions that throw
+ * `TypeError('Illegal invocation')` when they receive a foreign receiver.
+ * Browsers behave this way, while Node ignores the receiver, so the wrapper
+ * reproduces the production defect in tests. Always call `restore()` in a
+ * `finally` block.
+ *
+ * @returns {{ restore: () => void, scheduled: () => number }}
+ */
+function installBrowserLikeTimers() {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let scheduled = 0;
+
+  globalThis.setTimeout = function browserSetTimeout(callback, milliseconds, ...rest) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation');
+    }
+
+    scheduled += 1;
+    return originalSetTimeout(callback, milliseconds, ...rest);
+  };
+
+  globalThis.clearTimeout = function browserClearTimeout(timer) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation');
+    }
+
+    return originalClearTimeout(timer);
+  };
+
+  return {
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+    scheduled() {
+      return scheduled;
+    },
+  };
+}
+
+/**
+ * Waits for a predicate using the (possibly replaced) global timer.
+ *
+ * @param {() => boolean} predicate
+ * @param {number} [timeoutMs]
+ * @returns {Promise<boolean>}
+ */
+async function waitFor(predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return true;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
+
+  return predicate();
+}
+
+/**
  * @param {FakeRelay} relay
  * @param {object} [options]
  * @returns {Promise<{ roomCode: string, hostToken: string, hostLobby: object, guests: object[] }>}
@@ -955,6 +1020,68 @@ test('guest capabilities, first snapshot, statechange and merged log deltas', as
 
   aliceGuest.dispose();
   host.dispose();
+});
+
+test('guest keeps polling after join with browser-like timers and no Illegal invocation', async () => {
+  const relay = new FakeRelay();
+  const created = await relay.createRoom('Хост');
+  const timers = installBrowserLikeTimers();
+  const originalPoll = relay.playerPoll.bind(relay);
+  const errors = [];
+  let polls = 0;
+  let guest = null;
+  let host = null;
+
+  relay.playerPoll = (...args) => {
+    polls += 1;
+    return originalPoll(...args);
+  };
+
+  try {
+    guest = await GuestSession.join({
+      relay,
+      roomCode: created.roomCode,
+      name: 'Алиса',
+      continuous: true,
+      pollIntervalMs: 50,
+      sleep: async () => {},
+    });
+    guest.on('error', (error) => errors.push(error));
+
+    const hostState = await relay.hostPoll(created.roomCode, created.token, { actionSince: 0 });
+
+    host = new HostSession({
+      relay,
+      roomCode: created.roomCode,
+      token: created.token,
+      lobby: hostState.lobby,
+      hostName: 'Хост',
+      seed: 33,
+      autoPoll: false,
+      autoPublish: false,
+    });
+    await host.start();
+
+    const firstView = await guest.start();
+
+    assert.equal(firstView.viewerId, 'alice');
+    assert.equal(guest.getState().viewerId, 'alice');
+    assert.equal(polls, 1);
+
+    const continued = await waitFor(() => polls >= 2);
+
+    assert.equal(continued, true, 'the guest must keep polling after the first view');
+    assert.equal(guest.connected, true);
+    assert.equal(
+      errors.some((error) => /Illegal invocation/.test(String(error?.message))),
+      false,
+    );
+    assert.ok(timers.scheduled() > 0, 'the default timer wrapper must schedule the next poll');
+  } finally {
+    guest?.dispose();
+    host?.dispose();
+    timers.restore();
+  }
 });
 
 test('guest actions retry with the same actionId and pending clears on statechange', async () => {
@@ -1420,5 +1547,154 @@ test('two humans plus AI: AI acts only for the free seat and never through the r
   );
 
   aliceGuest.dispose();
+  host.dispose();
+});
+
+test('two AI seats complete a deal under host control without relay actions', async () => {
+  const relay = new FakeRelay();
+  const { roomCode, hostToken, hostLobby } = await setupRoom(relay, { guests: [] });
+  const host = createHost(relay, { roomCode, hostToken, hostLobby, seed: 33 });
+  const aliceAI = createAI({ playerId: 'alice', rng: host.createAIRng('alice') });
+  const borisAI = createAI({ playerId: 'boris', rng: host.createAIRng('boris') });
+
+  await host.start();
+
+  const result = await playDeal(host, {
+    ai: { alice: aliceAI, boris: borisAI },
+  });
+
+  assert.equal(host.getState().phase, PHASES.DEAL_END);
+  assert.equal(host.getState().completedTricks.length, 8);
+  assert.equal(result.tricks, 8);
+  assert.ok(result.aiActions > 0, 'the AI seats must act under host control');
+  assert.equal(relay.room(roomCode).actions.length, 0, 'AI seats never use the relay queue');
+
+  host.dispose();
+});
+
+test('simultaneous nextDeal advances one deal and repeated clicks are rejected', async () => {
+  const relay = new FakeRelay();
+  const { roomCode, hostToken, hostLobby, guests } = await setupRoom(relay, {
+    guests: ['Алиса', 'Борис'],
+  });
+  const alice = guests[0];
+  const boris = guests[1];
+  const host = createHost(relay, { roomCode, hostToken, hostLobby, seed: 33 });
+  const aliceGuest = createGuest(relay, roomCode, alice);
+  const borisGuest = createGuest(relay, roomCode, boris);
+
+  await host.start();
+  await aliceGuest.start();
+  await borisGuest.start();
+
+  await playDeal(host, { guests: { alice: aliceGuest, boris: borisGuest } });
+
+  assert.equal(host.getState().phase, PHASES.DEAL_END);
+
+  const dealBefore = host.getState().dealNumber;
+
+  await Promise.all([aliceGuest.nextDeal(), borisGuest.nextDeal()]);
+  await flushHost(host);
+  await aliceGuest.pollOnce();
+  await borisGuest.pollOnce();
+
+  assert.equal(host.getState().dealNumber, dealBefore + 1, 'only one deal may start');
+  assert.equal(host.getState().phase, PHASES.BIDDING);
+
+  const rejected = [...aliceGuest.messages, ...borisGuest.messages];
+
+  assert.equal(rejected.length, 1, 'exactly one simultaneous nextDeal must be rejected');
+  assert.equal(rejected[0].code, 'INVALID_PHASE');
+
+  const dealAfter = host.getState().dealNumber;
+
+  await aliceGuest.nextDeal();
+  await flushHost(host);
+  await aliceGuest.pollOnce();
+
+  assert.equal(host.getState().dealNumber, dealAfter, 'a repeated click must not start a deal');
+  assert.equal(host.getState().phase, PHASES.BIDDING);
+
+  aliceGuest.dispose();
+  borisGuest.dispose();
+  host.dispose();
+});
+
+test('guest view and public log never expose hidden prikup, foreign hands or tokens', async () => {
+  const relay = new FakeRelay();
+  const { roomCode, hostToken, hostLobby, guests } = await setupRoom(relay, {
+    guests: ['Алиса', 'Борис'],
+  });
+  const alice = guests[0];
+  const boris = guests[1];
+  const host = createHost(relay, { roomCode, hostToken, hostLobby, seed: 33 });
+  const aliceGuest = createGuest(relay, roomCode, alice);
+  const borisGuest = createGuest(relay, roomCode, boris);
+  const tokens = [hostToken, alice.token, boris.token];
+
+  await host.start();
+  await aliceGuest.start();
+  await borisGuest.start();
+
+  const viewBefore = aliceGuest.getState();
+  const logBefore = JSON.stringify(aliceGuest.log);
+
+  assert.deepEqual(viewBefore.prikup, []);
+  assert.equal(viewBefore.prikupRevealed, false);
+  assert.deepEqual(viewBefore.players.find((player) => player.id === 'boris').hand, []);
+  assert.deepEqual(viewBefore.players.find((player) => player.id === 'human').hand, []);
+
+  for (const token of tokens) {
+    assert.equal(JSON.stringify(viewBefore).includes(token), false, 'views must not contain tokens');
+    assert.equal(logBefore.includes(token), false, 'the log must not contain tokens');
+  }
+
+  let guard = 0;
+
+  while (host.getState().phase === PHASES.BIDDING) {
+    const state = host.getState();
+    const actor = state.currentBidderId;
+
+    assert.ok(actor, 'bidding must have an active player');
+
+    host.bid(actor, state.currentBid === 0 ? BIDDING.MIN : null);
+    await host.flush();
+    await aliceGuest.pollOnce();
+    await borisGuest.pollOnce();
+
+    guard += 1;
+
+    if (guard > 10) {
+      throw new Error('Bidding did not finish.');
+    }
+  }
+
+  assert.equal(host.getState().phase, PHASES.PRIKUP);
+
+  await aliceGuest.pollOnce();
+
+  const viewAfter = aliceGuest.getState();
+  const revealed = viewAfter.prikup;
+  const revealEntry = aliceGuest.log.find((entry) => entry.type === 'prikuprevealed');
+
+  assert.equal(viewAfter.prikupRevealed, true);
+  assert.equal(revealed.length, 3);
+  assert.ok(revealEntry, 'the public log must announce the revealed prikup');
+  assert.deepEqual(revealEntry.cards, revealed);
+
+  for (const cardId of revealed) {
+    assert.equal(
+      logBefore.includes(cardId),
+      false,
+      'the pre-reveal log must not contain a hidden prikup card',
+    );
+  }
+
+  for (const token of tokens) {
+    assert.equal(JSON.stringify(viewAfter).includes(token), false);
+  }
+
+  aliceGuest.dispose();
+  borisGuest.dispose();
   host.dispose();
 });

@@ -150,5 +150,6 @@ test('the not-implemented section lists v1 exclusions', () => {
   assert.match(text, /самосвал/i);
   assert.match(text, /тузовый марьяж/i);
   assert.match(text, /пересдача/i);
-  assert.match(text, /сетевая игра/i);
+  assert.match(text, /интернет/i);
+  assert.doesNotMatch(text, /сетевая игра/i);
 });

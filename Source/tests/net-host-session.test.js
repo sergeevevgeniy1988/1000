@@ -582,6 +582,69 @@ function createGuest(relay, roomCode, guest) {
 }
 
 /**
+ * Replaces the global timers with browser-like functions that throw
+ * `TypeError('Illegal invocation')` when they receive a foreign receiver.
+ * Always call `restore()` in a `finally` block.
+ *
+ * @returns {{ restore: () => void, scheduled: () => number }}
+ */
+function installBrowserLikeTimers() {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let scheduled = 0;
+
+  globalThis.setTimeout = function browserSetTimeout(callback, milliseconds, ...rest) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation');
+    }
+
+    scheduled += 1;
+    return originalSetTimeout(callback, milliseconds, ...rest);
+  };
+
+  globalThis.clearTimeout = function browserClearTimeout(timer) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError('Illegal invocation');
+    }
+
+    return originalClearTimeout(timer);
+  };
+
+  return {
+    restore() {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    },
+    scheduled() {
+      return scheduled;
+    },
+  };
+}
+
+/**
+ * Waits for a predicate using the (possibly replaced) global timer.
+ *
+ * @param {() => boolean} predicate
+ * @param {number} [timeoutMs]
+ * @returns {Promise<boolean>}
+ */
+async function waitFor(predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return true;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+  }
+
+  return predicate();
+}
+
+/**
  * @param {object} view
  * @param {string} playerId
  * @returns {import('../js/core/deck.js').Card[]}
@@ -817,7 +880,7 @@ async function playFullDeal(host, relay, roomCode, aliceToken, aliceGuest, boris
 
 test('HostSession capabilities, started publish and personal views without log', async () => {
   const relay = new FakeRelay();
-  const { roomCode, hostToken, hostLobby } = await setupRoom(relay, {
+  const { roomCode, hostToken, hostLobby, guests } = await setupRoom(relay, {
     guests: ['Алиса', 'Борис'],
   });
   const host = createHost(relay, { roomCode, hostToken, hostLobby });
@@ -849,6 +912,7 @@ test('HostSession capabilities, started publish and personal views without log',
 
   for (const playerId of SEATS) {
     const view = room.views[playerId];
+    const serialized = JSON.stringify(view);
 
     assert.ok(view, `${playerId} must receive a view`);
     assert.equal(view.viewerId, playerId);
@@ -866,6 +930,10 @@ test('HostSession capabilities, started publish and personal views without log',
 
     assert.deepEqual(view.prikup, []);
     assert.ok(measureViewBytes(view) <= HOST_VIEW_MAX_BYTES);
+
+    for (const token of [hostToken, ...guests.map((guest) => guest.token)]) {
+      assert.equal(serialized.includes(token), false, 'views must never contain room tokens');
+    }
   }
 
   host.dispose();
@@ -1244,6 +1312,57 @@ test('host protocol helpers enforce the poll cadence, action envelope and log bu
   assert.equal(capped.entries.length, 500);
   assert.equal(capped.dropped, 100);
   assert.equal(capped.entries[0], 100);
+});
+
+test('HostSession schedules poll and publish with browser-like timers', async () => {
+  const relay = new FakeRelay();
+  const { roomCode, hostToken, hostLobby } = await setupRoom(relay, { guests: [] });
+  const timers = installBrowserLikeTimers();
+  const originalPoll = relay.hostPoll.bind(relay);
+  const errors = [];
+  let polls = 0;
+  let host = null;
+
+  relay.hostPoll = (...args) => {
+    polls += 1;
+    return originalPoll(...args);
+  };
+
+  try {
+    host = new HostSession({
+      relay,
+      roomCode,
+      token: hostToken,
+      lobby: hostLobby,
+      hostName: 'Хост',
+      seed: 33,
+      actionPollIntervalMs: 10,
+    });
+    host.on('error', (error) => errors.push(error));
+
+    const state = await host.start();
+
+    assert.equal(state.viewerId, 'human');
+    assert.equal(host.started, true);
+
+    const polled = await waitFor(() => polls >= 2);
+
+    assert.equal(polled, true, 'the host must keep polling the action queue');
+
+    const versionBefore = relay.room(roomCode).publishVersion;
+
+    await host.resync();
+
+    assert.ok(relay.room(roomCode).publishVersion > versionBefore);
+    assert.equal(
+      errors.some((error) => /Illegal invocation/.test(String(error?.message))),
+      false,
+    );
+    assert.ok(timers.scheduled() > 0, 'the default timer wrapper must schedule work');
+  } finally {
+    host?.dispose();
+    timers.restore();
+  }
 });
 
 test('controller gates AI by isAI/controlsAI and blocks restart when canRestart is false', () => {

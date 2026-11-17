@@ -1271,7 +1271,7 @@ function Get-PrivateIPv4Candidates {
   return $result
 }
 
-$script:ServerVersion = '1.1.0'
+$script:ServerVersion = '1.2.0'
 $packagePath = Join-Path $PSScriptRoot '..\package.json'
 
 try {
