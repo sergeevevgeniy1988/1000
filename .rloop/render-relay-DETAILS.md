@@ -46,3 +46,18 @@ Added `js/config.js` with `RELAY_BASE_URL`: it reads the `relay-base-url` meta t
 7. For stage 4 docs: `relay-base-url` must be the bare HTTPS origin (for example `https://thousand-relay.onrender.com`, no trailing slash needed) and changing it requires a Pages redeploy.
 
 ---
+
+Item **4** done and marked `[x]`.
+
+## What I did
+Added `render.yaml` with a single Render web service `thousand-relay` (`type: web`, `runtime: node`, `plan: free`, `branch: main`, `buildCommand: npm install`, `startCommand: npm start`, `healthCheckPath: /api/health`, `autoDeploy: true`, env `HOST=0.0.0.0`, `FRONTEND_ORIGINS=https://sergeevevgeniy1988.github.io`, `ROOM_TTL_SECONDS=120`, `NODE_VERSION=22`; no databases or disks). Added `docs/RENDER.md` with account/Blueprint and manual **New Web Service** steps, env vars, `/api/health` verification, filling `relay-base-url`, Pages redeploy, post-deploy two-profile check, cold start/sleep behavior, 403/404/410 troubleshooting, rollback and prototype limits. Reworked `README.md` so it honestly describes the internet prototype: Pages frontend plus Render relay, invites on `github.io`, `relay-base-url` in the meta tag, local run via `npm start` on `127.0.0.1:8787`, Render limitations (host tab, Free sleep, in-memory rooms after sleep, no accounts), CORS/`FRONTEND_ORIGINS`/token/HTTPS security notes, actual `server/` + `js/config.js` + `docs/RENDER.md` structure, a tests section stating the 1.3.0 suite is not restored and the prototype is verified by smoke commands, and updated troubleshooting/known limitations.
+
+## Findings (important for later items)
+1. The stage-4 gate was executed directly from the plan line (all syntax checks, `render.yaml`/README/docs regexes, and the full room lifecycle smoke on port 8793) and printed `OK`; `git diff --check` is clean.
+2. `README.md` previously still documented removed `start.cmd`, `start-lan.cmd`, `run-tests.cmd`, `tools/` and `tests/`; these current-state sections were replaced, while the historical "Что нового в v1.2.0" changelog was intentionally left as history.
+3. `package.json` still has `"test": "node --test tests/"` while `tests/` does not exist; README now states this explicitly instead of claiming 240 tests. Restoring the suite remains out of scope.
+4. `server/config.js` defaults `SERVE_STATIC` to true, and `render.yaml` does not override it, so the Render service also serves the static allowlist even though Pages is the frontend. README mentions `SERVE_STATIC=0` as an optional switch.
+5. The relay has no per-IP rate limiting; abuse protection is only `MAX_ROOMS`, body/header/queue/view limits. README and `docs/RENDER.md` say so explicitly.
+6. `relay-base-url` must be the bare HTTPS origin (for example `https://thousand-relay.onrender.com`, no trailing slash); a malformed value collapses to same-origin in `js/config.js`, and any change needs a Pages redeploy. The actual Render deploy, cold start and cross-network play are user-run checks per `docs/RENDER.md`.
+
+---

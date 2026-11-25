@@ -1,0 +1,24 @@
+# Render Blueprint для relay «Тысячи».
+#
+# Один web-сервис без базы данных и диска: комнаты живут только в памяти
+# процесса. Подключите репозиторий в Render как Blueprint, либо создайте
+# Web Service вручную по инструкции из docs/RENDER.md.
+services:
+  - type: web
+    name: thousand-relay
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: FRONTEND_ORIGINS
+        value: https://sergeevevgeniy1988.github.io
+      - key: ROOM_TTL_SECONDS
+        value: "120"
+      - key: NODE_VERSION
+        value: "22"
