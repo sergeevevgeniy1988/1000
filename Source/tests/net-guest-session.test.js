@@ -832,11 +832,21 @@ async function makeAliceDeclarer(host, aliceGuest) {
  * @param {Record<string, GuestSession>} options.guests
  * @param {Record<string, ReturnType<typeof createAI>>} [options.ai]
  * @param {(state: object) => boolean} [options.stop]
- * @returns {Promise<{ guestActions: number, aiActions: number, tricks: number }>}
+ * @param {FakeRelay} [options.relay] When set together with `roomCode`, the
+ *   helper also checks gift privacy on the published views and log.
+ * @param {string} [options.roomCode]
+ * @returns {Promise<{ guestActions: number, aiActions: number, tricks: number, privacyChecked: boolean }>}
  */
-async function playDeal(host, { guests = {}, ai = {}, stop = null } = {}) {
+async function playDeal(host, {
+  guests = {},
+  ai = {},
+  stop = null,
+  relay = null,
+  roomCode = null,
+} = {}) {
   let guestActions = 0;
   let aiActions = 0;
+  let privacyChecked = false;
   let guard = 0;
 
   while (host.getState().phase !== PHASES.DEAL_END) {
@@ -881,6 +891,7 @@ async function playDeal(host, { guests = {}, ai = {}, stop = null } = {}) {
       await pollGuests(Object.values(guests));
     } else if (state.phase === PHASES.GIVING) {
       const declarerId = state.declarerId;
+      let giftCheck = null;
 
       if (!state.raiseDecided && state.givenCards.length === 0) {
         if (guests[declarerId]) {
@@ -902,9 +913,12 @@ async function playDeal(host, { guests = {}, ai = {}, stop = null } = {}) {
           (player) => player.id !== declarerId && !givenTo.has(player.id),
         );
         const cardId = self.hand.find((id) => !givenCards.has(id));
+        const firstGift = state.givenCards.length === 0;
 
         assert.ok(target, 'the declarer must have an opponent to give a card to');
         assert.ok(cardId, 'the declarer must have a card to give');
+
+        giftCheck = { declarerId, targetId: target.id, cardId, firstGift };
 
         if (guests[declarerId]) {
           await guests[declarerId].giveCard(target.id, cardId);
@@ -920,6 +934,43 @@ async function playDeal(host, { guests = {}, ai = {}, stop = null } = {}) {
 
       await flushHost(host);
       await pollGuests(Object.values(guests));
+
+      if (giftCheck?.firstGift && !privacyChecked && relay && roomCode) {
+        const room = relay.room(roomCode);
+        const thirdId = SEATS.find(
+          (id) => id !== giftCheck.declarerId && id !== giftCheck.targetId,
+        );
+        const publicGifts = room.log
+          .map((item) => item.entry)
+          .filter((entry) => entry.type === 'gift');
+
+        assert.ok(publicGifts.length >= 1, 'the public log must announce the gift');
+
+        for (const publicGift of publicGifts) {
+          assert.equal(
+            Object.hasOwn(publicGift, 'cardId'),
+            false,
+            'the public gift log must hide the card',
+          );
+        }
+
+        assert.deepEqual(room.views[giftCheck.declarerId].givenCards, [
+          { fromId: giftCheck.declarerId, toId: giftCheck.targetId, cardId: giftCheck.cardId },
+        ]);
+        assert.deepEqual(room.views[giftCheck.targetId].givenCards, [
+          { fromId: giftCheck.declarerId, toId: giftCheck.targetId, cardId: giftCheck.cardId },
+        ]);
+        assert.deepEqual(room.views[thirdId].givenCards, [
+          { fromId: giftCheck.declarerId, toId: giftCheck.targetId, cardId: null },
+        ]);
+        assert.equal(
+          JSON.stringify(room.views[thirdId].givenCards).includes(giftCheck.cardId),
+          false,
+          'the third seat must not see the gifted card',
+        );
+
+        privacyChecked = true;
+      }
     } else if (state.phase === PHASES.PLAYING) {
       const actor = state.currentPlayerId;
       const view = host.getPlayerView(actor);
@@ -960,6 +1011,7 @@ async function playDeal(host, { guests = {}, ai = {}, stop = null } = {}) {
     guestActions,
     aiActions,
     tricks: host.getState().completedTricks.length,
+    privacyChecked,
   };
 }
 
@@ -1479,11 +1531,14 @@ test('two live guests play a complete deal through their sessions', async () => 
 
   const result = await playDeal(host, {
     guests: { alice: aliceGuest, boris: borisGuest },
+    relay,
+    roomCode,
   });
 
   assert.equal(host.getState().phase, PHASES.DEAL_END);
   assert.equal(host.getState().completedTricks.length, 8);
   assert.equal(result.tricks, 8);
+  assert.equal(result.privacyChecked, true);
   assert.ok(result.guestActions >= 10, 'both guests must bid, give cards and play cards');
 
   const aliceView = aliceGuest.getState();

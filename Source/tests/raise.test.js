@@ -5,7 +5,7 @@ import { BIDDING, GAME_EVENTS, PHASES } from '../js/core/constants.js';
 import { GameError } from '../js/core/errors.js';
 import { scoreDeal } from '../js/core/scoring.js';
 import { createAI } from '../js/ai/ai.js';
-import { getRaiseOptions } from '../js/ui/raise.js';
+import { getRaiseBounds, getRaiseState, isLegalRaiseAmount } from '../js/ui/raise.js';
 import {
   createAllNegativeBiddingGame,
   createFixedGame,
@@ -29,6 +29,8 @@ const DOMINATING_PRIKUP = ['C10', 'S9', 'C9'];
 
 const STRONG_TEN = ['SA', 'HA', 'DA', 'CA', 'S10', 'H10', 'D10', 'C10', 'S9', 'C9'];
 const WEAK_TEN = ['S9', 'SJ', 'SQ', 'SK', 'H9', 'HJ', 'HQ', 'D9', 'DJ', 'D10'];
+const SPADE_HEART_TEN = ['SK', 'SQ', 'HK', 'HQ', 'SA', 'HA', 'D10', 'C10', 'S9', 'C9'];
+const HEART_DIAMOND_TEN = ['HK', 'HQ', 'DK', 'DQ', 'SA', 'HA', 'DA', 'C10', 'S9', 'C9'];
 
 function expectError(action, code) {
   assert.throws(
@@ -134,13 +136,98 @@ function resultFor(dealResult, playerId) {
   return dealResult.players.find((entry) => entry.id === playerId);
 }
 
-test('raise options cover every legal contract above the current one', () => {
-  assert.deepEqual(getRaiseOptions(80), [85, 90, 95, 100, 105, 110, 115, 120]);
-  assert.deepEqual(getRaiseOptions(85), [90, 95, 100, 105, 110, 115, 120]);
-  assert.deepEqual(getRaiseOptions(82), [85, 90, 95, 100, 105, 110, 115, 120]);
-  assert.deepEqual(getRaiseOptions(115), [120]);
-  assert.deepEqual(getRaiseOptions(120), []);
-  assert.deepEqual(getRaiseOptions(Number.NaN), []);
+test('raise bounds start at the next step and end at the hand maximum', () => {
+  assert.deepEqual(getRaiseBounds({ contract: 80, hand: STRONG_TEN }), {
+    min: 85,
+    max: 120,
+    canRaise: true,
+  });
+  assert.deepEqual(getRaiseBounds({ contract: 120, hand: STRONG_TEN }), {
+    min: 125,
+    max: 120,
+    canRaise: false,
+  });
+  assert.deepEqual(getRaiseBounds({ contract: 120, hand: SPADE_HEART_TEN }), {
+    min: 125,
+    max: 260,
+    canRaise: true,
+  });
+  assert.deepEqual(getRaiseBounds({ contract: 80, hand: HEART_DIAMOND_TEN }), {
+    min: 85,
+    max: 300,
+    canRaise: true,
+  });
+  assert.equal(getRaiseBounds({ contract: Number.NaN, hand: STRONG_TEN }).canRaise, false);
+  assert.equal(getRaiseBounds().canRaise, false);
+});
+
+test('raise state reports the open window and every closed reason', () => {
+  const open = getRaiseState(
+    createGivingView({ hand: SPADE_HEART_TEN, contract: 120 }),
+    'alice',
+  );
+
+  assert.equal(open.canRaise, true);
+  assert.equal(open.negative, false);
+  assert.equal(open.notice, null);
+  assert.equal(open.min, 125);
+  assert.equal(open.max, 260);
+
+  const defaultWindow = getRaiseState(createGivingView(), 'alice');
+
+  assert.equal(defaultWindow.canRaise, true);
+  assert.equal(defaultWindow.max, 120);
+
+  const maxed = getRaiseState(
+    createGivingView({ hand: STRONG_TEN, contract: 120 }),
+    'alice',
+  );
+
+  assert.equal(maxed.canRaise, false);
+  assert.match(maxed.notice, /максимальный/);
+
+  const negative = getRaiseState(createGivingView({ score: -80 }), 'alice');
+
+  assert.equal(negative.canRaise, false);
+  assert.equal(negative.negative, true);
+  assert.match(negative.notice, /отрицательный/);
+
+  const decided = getRaiseState(createGivingView({ raiseDecided: true }), 'alice');
+
+  assert.equal(decided.canRaise, false);
+  assert.match(decided.notice, /уже принято/);
+
+  const noHand = getRaiseState(createGivingView({ hand: [] }), 'alice');
+
+  assert.equal(noHand.canRaise, false);
+  assert.match(noHand.notice, /Рука/);
+
+  const giftsStarted = getRaiseState(
+    createGivingView({ givenCards: [{ toId: 'boris', cardId: 'S9' }] }),
+    'alice',
+  );
+
+  assert.equal(giftsStarted.canRaise, false);
+  assert.match(giftsStarted.notice, /первой отданной карты/);
+
+  assert.equal(getRaiseState(createGivingView(), 'boris').canRaise, false);
+});
+
+test('isLegalRaiseAmount accepts only steps above the contract up to the hand maximum', () => {
+  const bounds = { contract: 120, max: 300 };
+
+  assert.equal(isLegalRaiseAmount(125, bounds), true);
+  assert.equal(isLegalRaiseAmount(300, bounds), true);
+  assert.equal(isLegalRaiseAmount(305, bounds), false);
+  assert.equal(isLegalRaiseAmount(120, bounds), false);
+  assert.equal(isLegalRaiseAmount(80, bounds), false);
+  assert.equal(isLegalRaiseAmount(82, bounds), false);
+  assert.equal(isLegalRaiseAmount(130, { contract: 120, max: 120 }), false);
+  assert.equal(isLegalRaiseAmount(125.5, bounds), false);
+  assert.equal(isLegalRaiseAmount('125', bounds), false);
+  assert.equal(isLegalRaiseAmount(Number.NaN, bounds), false);
+  assert.equal(isLegalRaiseAmount(null, bounds), false);
+  assert.equal(isLegalRaiseAmount(125, {}), false);
 });
 
 test('the declarer raises the contract to 85, 100 or 120 exactly once', () => {
@@ -191,10 +278,21 @@ test('declining the raise keeps the contract and closes the window', () => {
   expectError(() => game.raiseContract('alice', 85), 'RAISE_ALREADY_DECIDED');
 });
 
+test('the declarer may raise above 120 up to the marriage limit', () => {
+  for (const target of [125, 220, 300]) {
+    const game = startGivingForAlice();
+    const state = game.raiseContract('alice', target);
+
+    assert.equal(state.contract, target);
+    assert.equal(state.raiseDecided, true);
+    assert.equal(getStatePlayer(state, 'alice').bid, target);
+  }
+});
+
 test('the raise window rejects invalid amounts without changing the contract', () => {
   const game = startGivingForAlice();
 
-  for (const amount of [125, 82, 80, 75, 79]) {
+  for (const amount of [82, 80, 75, 79, 305]) {
     expectError(() => game.raiseContract('alice', amount), 'INVALID_RAISE');
   }
 
@@ -202,6 +300,25 @@ test('the raise window rejects invalid amounts without changing the contract', (
 
   assert.equal(state.contract, BIDDING.MIN);
   assert.equal(state.raiseDecided, false);
+});
+
+test('a marriage completed by the prikup raises the maximum', () => {
+  const hands = {
+    alice: ['SK', 'HA', 'DA', 'CA', 'H9', 'D9', 'S9'],
+    boris: ['SJ', 'S10', 'HK', 'HJ', 'DK', 'DJ', 'CK'],
+    human: ['SA', 'C9', 'CQ', 'DQ', 'D10', 'HQ', 'H10'],
+  };
+  const prikup = ['SQ', 'CJ', 'C10'];
+
+  const legal = startGivingForAlice({ hands, prikup });
+  const raised = legal.raiseContract('alice', 160);
+
+  assert.equal(raised.contract, 160);
+
+  const illegal = startGivingForAlice({ hands, prikup });
+
+  expectError(() => illegal.raiseContract('alice', 165), 'INVALID_RAISE');
+  assert.equal(illegal.getState().contract, BIDDING.MIN);
 });
 
 test('a raise below the current contract is rejected', () => {

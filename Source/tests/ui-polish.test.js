@@ -11,8 +11,9 @@ import {
   formatGenitiveNames,
   resolveViewerId,
 } from '../js/ui/format.js';
+import { getGiftLogCardId } from '../js/ui/log.js';
 import { canViewerTakePrikup } from '../js/ui/prikup.js';
-import { shouldShowThinking } from '../js/ui/table.js';
+import { shouldShowThinking, getDealPoints } from '../js/ui/table.js';
 
 /**
  * @param {Partial<object>} [overrides]
@@ -83,6 +84,10 @@ test('engine errors become short Russian messages without internal ids', () => {
     getActionErrorMessage({ code: 'RAISE_ALREADY_DECIDED' }),
     'Решение о повышении заказа уже принято.',
   );
+  assert.equal(
+    getActionErrorMessage({ code: 'INVALID_RAISE' }),
+    'Заказ можно повысить только до числа больше текущего, кратного 5 и не выше 120 плюс бонусы марьяжей на руке.',
+  );
   assert.match(getActionErrorMessage({ code: 'MARRIAGE_NOT_ALLOWED' }), /первой завершённой взятки/);
   assert.equal(
     getActionErrorMessage({ code: 'MARRIAGE_PENDING' }),
@@ -152,8 +157,45 @@ test('phase announcements include the final contract during gifts', () => {
       currentPlayerId: 'human',
       declarerId: 'human',
       contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Выберите по одной карте для Алисы и Бориса.',
+  );
+});
+
+test('phase announcements ask the human declarer to raise or keep the contract', () => {
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 85,
+      raiseDecided: false,
+    })),
+    'Отдар. Заказ — 85. Повысьте заказ или оставьте текущий, максимум — 120.',
+  );
+
+  assert.equal(
+    getPhaseAnnouncement(createState({
+      phase: PHASES.GIVING,
+      currentPlayerId: 'human',
+      declarerId: 'human',
+      contract: 120,
+      raiseDecided: false,
+      players: [
+        { id: 'alice', name: 'Алиса', isHuman: false, isAI: true },
+        { id: 'boris', name: 'Борис', isHuman: false, isAI: true },
+        {
+          id: 'human',
+          name: 'Вы',
+          isHuman: true,
+          isAI: false,
+          score: 0,
+          hand: ['HK', 'HQ', 'DK', 'DQ', 'SA', 'HA', 'DA', 'C10', 'S9', 'C9'],
+        },
+      ],
+    })),
+    'Отдар. Заказ — 120. Повысьте заказ или оставьте текущий, максимум — 300.',
   );
 });
 
@@ -248,6 +290,16 @@ test('announcements build gift names from the current players', () => {
       phase: PHASES.GIVING,
       declarerId: 'host',
       contract: 85,
+      raiseDecided: false,
+    })),
+    'Отдар. Заказ — 85. Повысьте заказ или оставьте текущий, максимум — 120.',
+  );
+  assert.equal(
+    getPhaseAnnouncement(createMultiHumanState({
+      phase: PHASES.GIVING,
+      declarerId: 'host',
+      contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Выберите по одной карте для Анны и Бориса.',
   );
@@ -257,6 +309,7 @@ test('announcements build gift names from the current players', () => {
       phase: PHASES.GIVING,
       declarerId: 'host',
       contract: 85,
+      raiseDecided: true,
     })),
     'Отдар. Заказ — 85. Иван отдаёт карты соперникам.',
   );
@@ -275,6 +328,46 @@ test('announcements build gift names from the current players', () => {
     })),
     'Прикуп раскрыт всем игрокам. Иван забирает карты.',
   );
+});
+
+test('gift log entries show the card only to the giver and the receiver', () => {
+  const entry = {
+    type: 'gift',
+    fromId: 'alice',
+    toId: 'boris',
+    dealNumber: 2,
+  };
+  const gift = { fromId: 'alice', toId: 'boris', cardId: 'HQ' };
+
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 2,
+    givenCards: [gift],
+  })), 'HQ');
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'boris',
+    dealNumber: 2,
+    givenCards: [gift],
+  })), 'HQ');
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'human',
+    dealNumber: 2,
+    givenCards: [{ fromId: 'alice', toId: 'boris', cardId: null }],
+  })), null);
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 3,
+    givenCards: [gift],
+  })), null);
+  assert.equal(getGiftLogCardId(entry, createState({
+    viewerId: 'alice',
+    dealNumber: 2,
+    givenCards: [],
+  })), null);
+  assert.equal(getGiftLogCardId({ type: 'bid', dealNumber: 2 }, createState({
+    dealNumber: 2,
+    givenCards: [gift],
+  })), null);
 });
 
 test('viewer resolution and name lists keep the "Вы" forms', () => {
@@ -408,4 +501,65 @@ test('guest UI gates actions, pending status and host-only controls', () => {
 
   assert.match(mainSource, /dispose\?\.\(\)/);
   assert.match(mainSource, /sessionclosed/);
+});
+
+test('the raise decision is inline in the action bar and no raise modal remains', () => {
+  const controllerSource = readFileSync(
+    new URL('../js/ui/controller.js', import.meta.url),
+    'utf8',
+  );
+  const prikupSource = readFileSync(
+    new URL('../js/ui/prikup.js', import.meta.url),
+    'utf8',
+  );
+  const panelSource = readFileSync(
+    new URL('../js/ui/raise-panel.js', import.meta.url),
+    'utf8',
+  );
+  const cssSource = readFileSync(
+    new URL('../css/game-ui.css', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(controllerSource, /from '\.\/raise-panel\.js'/);
+  assert.match(controllerSource, /createRaiseControls\(/);
+  assert.doesNotMatch(controllerSource, /openRaiseModal/);
+  assert.doesNotMatch(prikupSource, /openRaiseModal/);
+  assert.match(panelSource, /Повысить заказ\?/);
+  assert.match(panelSource, /Максимум = 120 \+ бонусы марьяжей на руке\./);
+  assert.match(panelSource, /aria-label': 'Новая сумма заказа'/);
+  assert.match(panelSource, /isLegalRaiseAmount/);
+  assert.match(cssSource, /\.raise-controls \{/);
+  assert.match(cssSource, /\.raise-controls__input/);
+  assert.match(cssSource, /\.raise-controls__hint/);
+});
+
+test('deal points sum the trick and marriage points of the current deal', () => {
+  assert.equal(getDealPoints({ trickPoints: 0, marriagePoints: 0 }), 0);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: 40 }), 75);
+  assert.equal(getDealPoints({ trickPoints: 35 }), 35);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: null }), 35);
+  assert.equal(getDealPoints({}), 0);
+  assert.equal(getDealPoints(null), 0);
+  assert.equal(getDealPoints(undefined), 0);
+  assert.equal(getDealPoints({ trickPoints: '35', marriagePoints: 40 }), 40);
+  assert.equal(getDealPoints({ trickPoints: 35, marriagePoints: Number.NaN }), 35);
+});
+
+test('player panels show the current deal score in playing and scoring phases', () => {
+  const tableSource = readFileSync(
+    new URL('../js/ui/table.js', import.meta.url),
+    'utf8',
+  );
+  const cssSource = readFileSync(
+    new URL('../css/components.css', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(tableSource, /export function getDealPoints/);
+  assert.match(tableSource, /В партии: \$\{dealPoints\}/);
+  assert.match(tableSource, /DEAL_SCORE_PHASES\.has\(state\.phase\)/);
+  assert.match(tableSource, /PHASES\.PLAYING[\s\S]*PHASES\.SCORING[\s\S]*PHASES\.DEAL_END[\s\S]*PHASES\.GAME_OVER/);
+  assert.match(cssSource, /\.deal-score \{/);
+  assert.match(cssSource, /white-space: nowrap/);
 });

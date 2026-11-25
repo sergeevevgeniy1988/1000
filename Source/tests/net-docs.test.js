@@ -82,10 +82,10 @@ test('README lists the network test files and the automated acceptance limits', 
   assert.match(readme, /не покрываются|ограничени/i);
 });
 
-test('ACCEPTANCE is the v1.2.0 report with commands and network limits', () => {
+test('ACCEPTANCE is the v1.3.0 report with commands and network limits', () => {
   const acceptance = readFile(path.join(sourceDir, 'ACCEPTANCE.md'));
 
-  assert.match(acceptance, /^# Приёмка «Тысячи» v1\.2\.0/m);
+  assert.match(acceptance, /^# Приёмка «Тысячи» v1\.3\.0/m);
   assert.match(acceptance, /node --test tests\//);
   assert.match(acceptance, /run-tests\.cmd/);
   assert.match(acceptance, /All tests passed/);
@@ -95,23 +95,28 @@ test('ACCEPTANCE is the v1.2.0 report with commands and network limits', () => {
   assert.match(acceptance, /вкладк[аи] хоста/i);
   assert.match(acceptance, /Ограничения автоматической приёмки/);
   assert.match(acceptance, /PROMPT\.md/);
-  assert.match(acceptance, /227 тест/);
+  assert.match(acceptance, /240 тест/);
+  assert.match(acceptance, /Заказ больше 120/);
+  assert.match(acceptance, /инлайн-панел/i);
+  assert.match(acceptance, /Карта отдара/);
+  assert.match(acceptance, /Счёт раздачи/);
+  assert.match(acceptance, /1\.2\.0/);
 });
 
-test('package.json exposes version 1.2.0 and the standard test script', () => {
+test('package.json exposes version 1.3.0 and the standard test script', () => {
   const packageJson = JSON.parse(readFile(path.join(sourceDir, 'package.json')));
   const serve = readFile(path.join(sourceDir, 'tools', 'serve.ps1'));
 
-  assert.equal(packageJson.version, '1.2.0');
+  assert.equal(packageJson.version, '1.3.0');
   assert.equal(packageJson.scripts.test, 'node --test tests/');
   assert.equal(packageJson.private, true);
-  assert.match(serve, /\$script:ServerVersion = '1\.2\.0'/);
+  assert.match(serve, /\$script:ServerVersion = '1\.3\.0'/);
 });
 
-test('index.html shows the v1.2.0 footer and no longer claims to be offline-only', () => {
+test('index.html shows the v1.3.0 footer and no longer claims to be offline-only', () => {
   const index = readFile(path.join(sourceDir, 'index.html'));
 
-  assert.match(index, /Версия 1\.2\.0/);
+  assert.match(index, /Версия 1\.3\.0/);
   assert.match(index, /локальной сети/i);
   assert.match(index, /css\/network\.css/);
   assert.doesNotMatch(index, /Локальная игра без подключения к сети/);
@@ -127,8 +132,10 @@ test('rules describe the network mode, free AI seats and drop the old denial', (
   assert.match(rulesText, /локальной сети/i);
   assert.match(rulesText, /свободные места/i);
   assert.match(rulesText, /компьютер/i);
-  assert.match(rulesText, /1\.2\.0/);
+  assert.match(rulesText, /1\.3\.0/);
   assert.doesNotMatch(rulesText, /1\.1\.0/);
+  assert.match(rulesText, /120 плюс бонусы/i);
+  assert.match(rulesText, /видит отдающий и получатель/i);
   assert.match(notImplementedText, /интернет/i);
   assert.doesNotMatch(notImplementedText, /сетевая игра/i);
 });

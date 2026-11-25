@@ -13,6 +13,7 @@ import { deepFreeze, normalizeDeck, normalizePlayers } from './game-setup.js';
 import {
   getAvailableMarriages,
   getLegalCards,
+  getMaxContract,
   getTrickPoints,
   getTrickWinner,
   isMarriageConfirmationCard,
@@ -322,12 +323,14 @@ export class Game {
       || !Number.isInteger(amountOrNull)
       || amountOrNull % BIDDING.STEP !== 0
       || amountOrNull <= this.#contract
-      || amountOrNull > BIDDING.MAX
+      || amountOrNull > getMaxContract(player.hand)
     ) {
+      const maxContract = getMaxContract(player.hand);
+
       this.#fail(
         'INVALID_RAISE',
-        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${BIDDING.MAX}.`,
-        { amount: amountOrNull, contract: this.#contract },
+        `Заказ можно повысить до числа больше ${this.#contract}, кратного ${BIDDING.STEP} и не выше ${maxContract}.`,
+        { amount: amountOrNull, contract: this.#contract, maxContract },
       );
     }
 
@@ -404,13 +407,16 @@ export class Game {
     target.hand.push(card);
     this.#givenCards.push({ fromId: declarer.id, toId: target.id, card });
 
+    // The public log carries no card: only the giver and the receiver may see
+    // which card was handed over, and they read it from `givenCards`.
+    this.#addLog('gift', { fromId: declarer.id, toId: target.id });
+
     const payload = deepFreeze({
       fromId: declarer.id,
       toId: target.id,
       cardId: card.id,
     });
 
-    this.#addLog('gift', payload);
     this.#emitter.emit(GAME_EVENTS.GIFT, payload);
 
     if (this.#givenCards.length === PLAYER_COUNT - 1) {
@@ -1091,7 +1097,9 @@ export class Game {
       givenCards: this.#givenCards.map((gift) => ({
         fromId: gift.fromId,
         toId: gift.toId,
-        cardId: gift.card.id,
+        cardId: viewerId === null || viewerId === gift.fromId || viewerId === gift.toId
+          ? gift.card.id
+          : null,
       })),
       trumpSuit: this.#trumpSuit,
       trumpDeclaredBy: this.#trumpDeclaredBy,

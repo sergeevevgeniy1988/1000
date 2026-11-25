@@ -1,9 +1,7 @@
-import { BIDDING } from '../core/constants.js';
 import { createElement } from './dom.js';
 import { formatDativeNames, nameDative, resolveViewerId } from './format.js';
 import { createCard, sortHand } from './hand.js';
 import { openModal } from './modals.js';
-import { getRaiseOptions } from './raise.js';
 
 /**
  * Decides who may take the revealed prikup. The declarer always may; a host
@@ -112,75 +110,6 @@ export function openPrikupRevealModal({
     subtitle: 'Три карты раскрыты всем игрокам',
     body,
     footer,
-    actions,
-    dismissible: false,
-    className: 'modal--prikup',
-  });
-}
-
-/**
- * Opens the single contract-raise window for a human declarer after the prikup
- * is taken and before the first gift.
- *
- * @param {object} options
- * @param {object} options.state Player view snapshot.
- * @param {string} options.viewerId Seat the UI shows.
- * @param {(amount: number) => void} options.onRaise
- * @param {() => void} options.onDecline
- * @returns {{ element: HTMLElement, close: () => void } | null}
- */
-export function openRaiseModal({ state, viewerId, onRaise, onDecline }) {
-  const declarer = state.players.find((player) => player.id === state.declarerId);
-  const resolvedViewerId = viewerId ?? resolveViewerId(state);
-
-  if (!declarer || declarer.id !== resolvedViewerId) {
-    return null;
-  }
-
-  const negative = Number.isFinite(declarer.score) && declarer.score < 0;
-  const options = negative ? [] : getRaiseOptions(state.contract);
-  const body = createElement('div', { className: 'prikup' });
-  let introText;
-
-  if (negative) {
-    introText = 'Повышение недоступно: отрицательный счёт.';
-  } else if (options.length === 0) {
-    introText = `Текущий заказ — ${state.contract}. Заказ уже максимальный: повышать некуда.`;
-  } else {
-    introText = `Текущий заказ — ${state.contract}. Можно один раз повысить его до первой карты отдара, но не выше ${BIDDING.MAX}.`;
-  }
-
-  body.append(createElement('p', {
-    className: 'prikup__intro',
-    text: introText,
-  }));
-
-  const actions = [];
-
-  if (!negative) {
-    for (const amount of options) {
-      actions.push({
-        label: String(amount),
-        onClick: () => onRaise?.(amount),
-        variant: 'ghost',
-        action: `raise-${amount}`,
-      });
-    }
-  }
-
-  actions.push({
-    label: negative ? 'Продолжить' : 'Оставить заказ',
-    onClick: () => onDecline?.(),
-    variant: 'primary',
-    action: 'decline-raise',
-    autofocus: true,
-  });
-
-  return openModal({
-    kind: 'raise',
-    title: 'Повысить заказ?',
-    subtitle: negative ? 'Повышение недоступно' : 'Один раз до первой карты отдара',
-    body,
     actions,
     dismissible: false,
     className: 'modal--prikup',

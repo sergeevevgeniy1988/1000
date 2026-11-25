@@ -7,6 +7,7 @@ import {
   DEAL,
   GAME_EVENTS,
   MARRIAGE_BONUSES,
+  MAX_CONTRACT,
   PHASES,
   RANK_INFO,
   RANKS,
@@ -122,6 +123,7 @@ test('game constants are frozen and contain the expected limits', () => {
   assert.equal(BIDDING.MIN, 80);
   assert.equal(BIDDING.MAX, 120);
   assert.equal(BIDDING.STEP, 5);
+  assert.equal(MAX_CONTRACT, 400);
   assert.equal(TARGET_SCORE, 1000);
   assert.equal(BOLTS.LIMIT, 3);
   assert.equal(BOLTS.PENALTY, 120);

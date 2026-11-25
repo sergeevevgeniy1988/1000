@@ -1,6 +1,6 @@
 import { BIDDING, GAME_EVENTS, PHASES } from '../core/constants.js';
 import { getCardById } from '../core/deck.js';
-import { getLegalCards, getMarriageConfirmationCards } from '../core/rules.js';
+import { getLegalCards, getMarriageConfirmationCards, getMaxContract } from '../core/rules.js';
 import { createAI } from '../ai/ai.js';
 import { getConnectionBanner } from '../net/lobby.js';
 import { clearElement, createElement } from './dom.js';
@@ -22,7 +22,9 @@ import {
   createMarriageMenu,
   createPendingMarriageStatus,
 } from './marriage.js';
-import { openGiftModal, openPrikupRevealModal, openRaiseModal } from './prikup.js';
+import { openGiftModal, openPrikupRevealModal } from './prikup.js';
+import { createRaiseControls } from './raise-panel.js';
+import { isLegalRaiseAmount } from './raise.js';
 import {
   closeModal,
   getOpenModalKind,
@@ -817,22 +819,24 @@ export class Controller {
       }
       case PHASES.GIVING: {
         const declarer = state.players.find((player) => player.id === state.declarerId);
-        const viewer = state.players.find((player) => player.id === viewerId);
         const declarerIsSelf = Boolean(declarer && declarer.id === viewerId);
+        const raiseWindowOpen = !state.raiseDecided && state.givenCards.length === 0;
         let statusText;
 
+        if (declarerIsSelf && raiseWindowOpen) {
+          // The raise decision lives in the action bar so the table and the
+          // declarer's ten-card hand stay visible while choosing an amount.
+          bar.append(createRaiseControls({
+            state,
+            viewerId,
+            onRaise: (amount) => this.#humanRaise(amount),
+            onDecline: () => this.#humanDeclineRaise(),
+          }));
+          break;
+        }
+
         if (!state.raiseDecided) {
-          if (declarerIsSelf) {
-            if (viewer && viewer.score < 0) {
-              statusText = 'Повышение недоступно: отрицательный счёт.';
-            } else if (state.contract >= BIDDING.MAX) {
-              statusText = 'Заказ максимальный: повышать некуда.';
-            } else {
-              statusText = 'Решите, повышать ли заказ, в окне повышения.';
-            }
-          } else {
-            statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
-          }
+          statusText = `${declarer?.name ?? 'Играющий'} решает, повышать ли заказ…`;
         } else if (declarerIsSelf) {
           const opponents = state.players.filter((player) => player.id !== viewerId);
           const names = formatGenitiveNames(opponents.map((player) => player.name));
@@ -1196,8 +1200,11 @@ export class Controller {
     const viewerId = this.#getViewerId(state);
     const isHost = this.#session?.capabilities?.isHost === true;
     const kind = getOpenModalKind();
+    const giftModalOpen = state.phase === PHASES.GIVING
+      && state.declarerId === viewerId
+      && (state.raiseDecided === true || state.givenCards.length > 0);
     const mandatoryModal = state.phase === PHASES.PRIKUP
-      || (state.phase === PHASES.GIVING && state.declarerId === viewerId)
+      || giftModalOpen
       || state.phase === PHASES.DEAL_END
       || state.phase === PHASES.GAME_OVER;
 
@@ -1220,15 +1227,11 @@ export class Controller {
     }
 
     if (state.phase === PHASES.GIVING && state.declarerId === viewerId) {
-      if (!state.raiseDecided && state.givenCards.length === 0) {
-        if (kind !== 'raise') {
+      if (!giftModalOpen) {
+        // The raise window is inline in the action bar, so the reveal modal
+        // must not cover the declarer's hand while choosing an amount.
+        if (kind === 'prikup-reveal') {
           closeModal({ silent: true });
-          openRaiseModal({
-            state,
-            viewerId,
-            onRaise: (amount) => this.#humanRaise(amount),
-            onDecline: () => this.#humanDeclineRaise(),
-          });
         }
 
         return;
@@ -1276,7 +1279,6 @@ export class Controller {
     if (
       kind === 'prikup'
       || kind === 'prikup-reveal'
-      || kind === 'raise'
       || kind === 'results'
       || kind === 'gameover'
     ) {
@@ -1420,7 +1422,9 @@ export class Controller {
               }
             }
 
-            if (!isLegalRaise(state, amount) || actor.score < 0) {
+            // The ceiling depends on the acting AI's own ten-card hand, so a
+            // raise above BIDDING.MAX is legal when marriages are available.
+            if (!isLegalRaise(state, amount, getMaxContract(getViewHand(view, actor.id))) || actor.score < 0) {
               amount = null;
             }
 
@@ -1617,16 +1621,30 @@ function isLegalBid(state, amount) {
  * @param {number | null} amount
  * @returns {boolean}
  */
-function isLegalRaise(state, amount) {
+function isLegalRaise(state, amount, max) {
   if (amount === null) {
     return true;
   }
 
-  return typeof amount === 'number'
-    && Number.isInteger(amount)
-    && amount % BIDDING.STEP === 0
-    && amount > state.contract
-    && amount <= BIDDING.MAX;
+  return isLegalRaiseAmount(amount, {
+    contract: Number.isFinite(state.contract) ? state.contract : 0,
+    max,
+  });
+}
+
+/**
+ * Reads the acting player's own hand from their player view.
+ *
+ * @param {object} view Player view carrying the acting AI's hand.
+ * @param {string} playerId
+ * @returns {string[]}
+ */
+function getViewHand(view, playerId) {
+  const self = Array.isArray(view?.players)
+    ? view.players.find((player) => player && player.id === playerId)
+    : null;
+
+  return Array.isArray(self?.hand) ? self.hand : [];
 }
 
 /**

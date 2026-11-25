@@ -19,6 +19,14 @@ const ACTING_PHASES = new Set([
   PHASES.PLAYING,
 ]);
 
+/** Phases where the points collected in the current deal are worth showing. */
+const DEAL_SCORE_PHASES = new Set([
+  PHASES.PLAYING,
+  PHASES.SCORING,
+  PHASES.DEAL_END,
+  PHASES.GAME_OVER,
+]);
+
 /**
  * @param {object} state
  * @param {string} playerId
@@ -173,6 +181,20 @@ function createBolts(state, player) {
 }
 
 /**
+ * Points collected by a player in the current deal: taken card points plus
+ * declared marriage bonuses. Missing or non-numeric values count as zero.
+ *
+ * @param {object | null | undefined} player
+ * @returns {number}
+ */
+export function getDealPoints(player) {
+  const trickPoints = Number.isFinite(player?.trickPoints) ? player.trickPoints : 0;
+  const marriagePoints = Number.isFinite(player?.marriagePoints) ? player.marriagePoints : 0;
+
+  return trickPoints + marriagePoints;
+}
+
+/**
  * Creates a player summary panel.
  *
  * @param {object} state
@@ -183,6 +205,8 @@ function createBolts(state, player) {
 export function createPlayerPanel(state, player, viewerId = null) {
   const resolvedViewerId = viewerId ?? resolveViewerId(state);
   const isSelf = player.id === resolvedViewerId;
+  const showDealScore = DEAL_SCORE_PHASES.has(state.phase);
+  const dealPoints = getDealPoints(player);
   const panel = createElement('article', {
     className: [
       'player-card',
@@ -190,7 +214,8 @@ export function createPlayerPanel(state, player, viewerId = null) {
       isActing(state, player) ? 'player-card--active' : '',
     ],
     attrs: {
-      'aria-label': `${player.name}. Счёт: ${player.score}. Болтов: ${player.bolts} из ${BOLTS.LIMIT}.`,
+      'aria-label': `${player.name}. Счёт: ${player.score}. Болтов: ${player.bolts} из ${BOLTS.LIMIT}.`
+        + (showDealScore ? ` В партии: ${dealPoints}.` : ''),
     },
     dataset: { playerId: player.id },
   });
@@ -237,6 +262,13 @@ export function createPlayerPanel(state, player, viewerId = null) {
     createBolts(state, player),
     createElement('span', { className: 'card-count', text: formatCards(player.cardCount) }),
   );
+
+  if (showDealScore) {
+    stats.append(createElement('span', {
+      className: 'deal-score',
+      text: `В партии: ${dealPoints}`,
+    }));
+  }
 
   const statusRow = createElement('div', { className: 'player-card__status' });
   const status = createStatus(state, player, resolvedViewerId);

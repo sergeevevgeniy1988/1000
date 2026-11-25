@@ -8,6 +8,7 @@ import {
   getAvailableMarriages,
   getLegalCards,
   getMarriageConfirmationCards,
+  getMaxContract,
   getTrickPoints,
   getTrickWinner,
   isCardLegal,
@@ -135,6 +136,25 @@ test('getAvailableMarriages lists undeclared king-queen pairs with bonuses', () 
 
   assert.deepEqual(getAvailableMarriages(hand, ['S']), [{ suit: 'H', value: 100 }]);
   assert.deepEqual(getAvailableMarriages(cards('SK', 'HQ'), []), []);
+});
+
+test('getMaxContract adds marriage bonuses on top of the top bid', () => {
+  assert.equal(getMaxContract([]), 120);
+  assert.equal(getMaxContract(cards('SA', 'HA', 'DA', 'CA')), 120);
+  assert.equal(getMaxContract(cards('HK', 'HQ', 'S9', 'C9')), 220);
+  assert.equal(getMaxContract(cards('HK', 'HQ', 'SK', 'SQ', 'S9')), 260);
+  assert.equal(
+    getMaxContract(cards('SK', 'SQ', 'HK', 'HQ', 'DK', 'DQ', 'CK', 'CQ', 'S9', 'H9')),
+    400,
+  );
+});
+
+test('getMaxContract does not mutate the hand', () => {
+  const hand = cards('HK', 'HQ', 'SK', 'SQ', 'D9');
+  const snapshot = ids(hand);
+
+  assert.equal(getMaxContract(hand), 260);
+  assert.deepEqual(ids(hand), snapshot);
 });
 
 test('marriage confirmation helpers return the king and queen of a suit', () => {

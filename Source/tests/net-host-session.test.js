@@ -717,12 +717,13 @@ async function submitGuestAction(host, relay, roomCode, token, type, payload = {
  * @param {string} aliceToken
  * @param {GuestSession} aliceGuest
  * @param {object} borisAI
- * @returns {Promise<{ guestActions: number, aiActions: number, prikupChecked: boolean }>}
+ * @returns {Promise<{ guestActions: number, aiActions: number, prikupChecked: boolean, privacyChecked: boolean }>}
  */
 async function playFullDeal(host, relay, roomCode, aliceToken, aliceGuest, borisAI) {
   let guestActions = 0;
   let aiActions = 0;
   let prikupChecked = false;
+  let privacyChecked = false;
   let guard = 0;
 
   while (host.getState().phase !== PHASES.DEAL_END) {
@@ -809,6 +810,7 @@ async function playFullDeal(host, relay, roomCode, aliceToken, aliceGuest, boris
           (player) => player.id !== declarerId && !givenTo.has(player.id),
         );
         const cardId = self.hand.find((id) => !givenCards.has(id));
+        const firstGift = state.givenCards.length === 0;
 
         assert.ok(target, 'the declarer must have an opponent to give a card to');
         assert.ok(cardId, 'the declarer must have a card to give');
@@ -830,6 +832,39 @@ async function playFullDeal(host, relay, roomCode, aliceToken, aliceGuest, boris
           if (declarerId === 'boris') {
             aiActions += 1;
           }
+        }
+
+        if (firstGift && !privacyChecked) {
+          const room = relay.room(roomCode);
+          const thirdId = SEATS.find((id) => id !== declarerId && id !== target.id);
+          const publicGifts = room.log
+            .map((item) => item.entry)
+            .filter((entry) => entry.type === 'gift');
+
+          assert.ok(publicGifts.length >= 1, 'the public log must announce the gift');
+          for (const publicGift of publicGifts) {
+            assert.equal(
+              Object.hasOwn(publicGift, 'cardId'),
+              false,
+              'the public gift log must hide the card',
+            );
+          }
+          assert.deepEqual(room.views[declarerId].givenCards, [
+            { fromId: declarerId, toId: target.id, cardId },
+          ]);
+          assert.deepEqual(room.views[target.id].givenCards, [
+            { fromId: declarerId, toId: target.id, cardId },
+          ]);
+          assert.deepEqual(room.views[thirdId].givenCards, [
+            { fromId: declarerId, toId: target.id, cardId: null },
+          ]);
+          assert.equal(
+            JSON.stringify(room.views[thirdId].givenCards).includes(cardId),
+            false,
+            'the third seat must not see the gifted card',
+          );
+
+          privacyChecked = true;
         }
       }
     } else if (state.phase === PHASES.PLAYING) {
@@ -875,7 +910,7 @@ async function playFullDeal(host, relay, roomCode, aliceToken, aliceGuest, boris
     }
   }
 
-  return { guestActions, aiActions, prikupChecked };
+  return { guestActions, aiActions, prikupChecked, privacyChecked };
 }
 
 test('HostSession capabilities, started publish and personal views without log', async () => {
@@ -1158,6 +1193,7 @@ test('HostSession and GuestSession play a complete deal through the fake relay',
   const result = await playFullDeal(host, relay, roomCode, alice.token, aliceGuest, borisAI);
 
   assert.equal(result.prikupChecked, true);
+  assert.equal(result.privacyChecked, true);
   assert.ok(result.guestActions >= 6, 'the guest must bid, take the prikup, give cards and play cards');
   assert.ok(result.aiActions > 0, 'the AI seat must act under host control');
   assert.equal(

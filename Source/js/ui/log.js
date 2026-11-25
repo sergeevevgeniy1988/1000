@@ -139,6 +139,36 @@ function addStrong(container, value) {
 }
 
 /**
+ * Returns the card id a `gift` log entry may show to the current viewer.
+ *
+ * The public log never stores the card, so the id is looked up in the
+ * snapshot's `givenCards`, which keeps the card only for the giver and the
+ * receiver. Entries from a previous deal stay hidden.
+ *
+ * @param {object} entry
+ * @param {object} state
+ * @returns {string | null}
+ */
+export function getGiftLogCardId(entry, state) {
+  if (!entry || entry.type !== 'gift') {
+    return null;
+  }
+
+  if (entry.dealNumber !== state?.dealNumber) {
+    return null;
+  }
+
+  const gifts = Array.isArray(state?.givenCards) ? state.givenCards : [];
+  const gift = gifts.find((item) => item
+    && item.fromId === entry.fromId
+    && item.toId === entry.toId
+    && typeof item.cardId === 'string'
+    && item.cardId.length > 0);
+
+  return gift ? gift.cardId : null;
+}
+
+/**
  * Creates one semantic log entry in Russian.
  *
  * @param {object} entry
@@ -221,9 +251,15 @@ export function createLogEntry(entry, state) {
     case 'gift': {
       const player = findPlayer(state, entry.fromId);
       const verb = verbForPlayer(player, viewerId, 'отдаёт', 'отдаёт', 'отдаёте');
+      const giftCardId = getGiftLogCardId(entry, state);
 
       addText(text, `${playerName(state, entry.fromId, viewerId)} ${verb} `);
-      text.append(createCardChip(entry.cardId));
+
+      if (giftCardId) {
+        text.append(createCardChip(giftCardId));
+      } else {
+        addText(text, 'карту');
+      }
 
       const receiverName = playerName(state, entry.toId, viewerId);
 
