@@ -30,3 +30,19 @@ Extended `server/relay.js` with the full game transport and room lifecycle: timi
 8. Both plan gates (`stage 2` lifecycle and `ROOM_TTL_SECONDS=2`) print `OK`, the stage-1 gate still prints `OK`, and an extra local check confirmed duplicate publish, `gameReset`, kick/leave token invalidation, wrong-role 403s and CORS headers on errors.
 
 ---
+
+Item **3** done and marked `[x]`.
+
+## What I did
+Added `js/config.js` with `RELAY_BASE_URL`: it reads the `relay-base-url` meta tag, trims whitespace, strips trailing slashes, collapses a URL on the current `location.origin` to an empty string (same-origin), returns an empty string for invalid values and in Node/without a DOM, and exports `resolveRelayBaseUrl` for that normalization. Added `<meta name="relay-base-url" content="">` with a Render comment to `index.html` and changed the description/footer wording from a LAN to an internet network without touching version 1.3.0. `js/main.js` now imports `RELAY_BASE_URL` and builds `new RelayClient({ baseUrl: RELAY_BASE_URL })`; the `?room=` and invite flow are unchanged. Added `HEALTH_TIMEOUT_MS = 30000` and `HEALTH_RETRY_ATTEMPTS = 2` to `js/net/protocol.js`. `RelayClient` gained `healthTimeoutMs`/`healthRetryAttempts` (constructor options plus private fields); `health()` now uses `retry: true` with those per-call `timeoutMs`/`attempts`, and `#request`/`#requestOnce` accept a per-call timeout, while every other method keeps 8000 ms and 3 attempts. In `js/net/lobby.js` the instruction texts no longer mention `start-lan.cmd`, `getHealthInstruction()` accepts `health.network === true` as an available relay, the modal's `checkHealth()` shows «Проверяем сервер…» while waiting and clears it on success, and the modal subtitle is now «Сетевая комната»; the unavailable-relay branch still shows the instruction plus «Проверить снова» and «Играть локально».
+
+## Findings (important for later items)
+1. `RELAY_BASE_URL` is evaluated once at module load from the meta tag; because module scripts run after `head` is parsed, the meta is always visible. An empty value keeps requests same-origin, so the local relay server still works without configuration.
+2. `resolveRelayBaseUrl` collapses same-origin and invalid values to `''`; this is also the safe fallback if the user writes a malformed address (the lobby then just fails health instead of hitting a bogus origin).
+3. `RelayClient` still sends `credentials: 'same-origin'`, so cross-origin requests to Render carry no cookies and the server's CORS never enables `Allow-Credentials`; the room token stays in `X-Room-Token`.
+4. Health now performs up to two 30 s attempts (`healthTimeoutMs`/`healthRetryAttempts` are constructor options for tests), while `createRoom`/`joinRoom`/`kick`/`close`/`leave` never retry and polls/publish/action keep 8 s and 3 attempts.
+5. `getHealthInstruction()` still accepts the legacy `lan: true` flag, so a stage-1/stage-2 relay without `network` keeps working; the check order is `ok && (lan || network)` first, then `lan_disabled`-style text for an `ok` relay without either flag, then `server_unavailable`.
+6. The stage-3 gate prints `OK` (syntax, Node-empty `RELAY_BASE_URL`, meta present, `RELAY_BASE_URL` in `js/main.js`, no `start-lan.cmd` in `js/net/lobby.js`, static serving of `/js/config.js` and the meta in `/`). Extra checks: `resolveRelayBaseUrl` for remote/same-origin/invalid/undefined, `health()` hitting `<baseUrl>/api/health` with two attempts on timeout, `createRoom` not retrying, `hostPoll` still three attempts.
+7. For stage 4 docs: `relay-base-url` must be the bare HTTPS origin (for example `https://thousand-relay.onrender.com`, no trailing slash needed) and changing it requires a Pages redeploy.
+
+---

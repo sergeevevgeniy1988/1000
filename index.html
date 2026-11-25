@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b2b20">
-  <meta name="description" content="«Тысяча» — карточная игра на троих: локально против двух AI-соперников или по локальной сети с друзьями.">
+  <!-- HTTPS-адрес relay на Render, например https://thousand-relay.onrender.com.
+       Пустое значение оставляет клиента на same-origin, как у локального сервера. -->
+  <meta name="relay-base-url" content="">
+  <meta name="description" content="«Тысяча» — карточная игра на троих: локально против двух AI-соперников или по сети через интернет с друзьями.">
   <title>1000 — Тысяча</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="css/reset.css">
@@ -76,7 +79,7 @@
     </main>
 
     <footer class="app-footer">
-      <span>Версия 1.3.0 · локальная игра или сеть по локальной сети</span>
+      <span>Версия 1.3.0 · локальная игра или сеть через интернет</span>
       <span aria-hidden="true">♠ ♥ ♦ ♣</span>
     </footer>
   </div>

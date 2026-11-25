@@ -1,5 +1,7 @@
 import {
   ACTION_ID_MAX_LENGTH,
+  HEALTH_RETRY_ATTEMPTS,
+  HEALTH_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
   RETRY_ATTEMPTS,
   RETRY_BASE_DELAY_MS,
@@ -52,23 +54,28 @@ function isAbortError(error) {
 /**
  * Thin same-origin JSON client for the LAN relay. The token is only ever sent
  * in the `X-Room-Token` header; it is never appended to a URL, logged or
- * written to `location`.
+ * written to `location`. An optional `baseUrl` points the client at a remote
+ * relay (Render); an empty base URL keeps every request on the current origin.
  */
 export class RelayClient {
   #baseUrl;
   #fetchImpl;
   #timeoutMs;
   #retryAttempts;
+  #healthTimeoutMs;
+  #healthRetryAttempts;
   #retryBaseDelayMs;
   #sleep;
   #AbortControllerImpl;
 
   /**
    * @param {object} [options]
-   * @param {string} [options.baseUrl] Same-origin base URL, empty by default.
+   * @param {string} [options.baseUrl] Relay origin, empty for same-origin.
    * @param {typeof fetch | null} [options.fetchImpl]
    * @param {number} [options.timeoutMs]
    * @param {number} [options.retryAttempts]
+   * @param {number} [options.healthTimeoutMs]
+   * @param {number} [options.healthRetryAttempts]
    * @param {number} [options.retryBaseDelayMs]
    * @param {(milliseconds: number) => Promise<void>} [options.sleep]
    * @param {typeof AbortController | null} [options.AbortControllerImpl]
@@ -78,6 +85,8 @@ export class RelayClient {
     fetchImpl = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null,
     timeoutMs = REQUEST_TIMEOUT_MS,
     retryAttempts = RETRY_ATTEMPTS,
+    healthTimeoutMs = HEALTH_TIMEOUT_MS,
+    healthRetryAttempts = HEALTH_RETRY_ATTEMPTS,
     retryBaseDelayMs = RETRY_BASE_DELAY_MS,
     sleep = defaultSleep,
     AbortControllerImpl = typeof globalThis.AbortController === 'function'
@@ -88,14 +97,25 @@ export class RelayClient {
     this.#fetchImpl = fetchImpl;
     this.#timeoutMs = timeoutMs;
     this.#retryAttempts = Math.max(1, retryAttempts);
+    this.#healthTimeoutMs = healthTimeoutMs;
+    this.#healthRetryAttempts = Math.max(1, healthRetryAttempts);
     this.#retryBaseDelayMs = Math.max(0, retryBaseDelayMs);
     this.#sleep = sleep;
     this.#AbortControllerImpl = AbortControllerImpl;
   }
 
-  /** @returns {Promise<object>} */
+  /**
+   * Checks `/api/health`. The request tolerates a Render cold start: it waits
+   * much longer than a game request and is attempted twice.
+   *
+   * @returns {Promise<object>}
+   */
   health() {
-    return this.#request('GET', '/api/health', { retry: false });
+    return this.#request('GET', '/api/health', {
+      retry: true,
+      timeoutMs: this.#healthTimeoutMs,
+      attempts: this.#healthRetryAttempts,
+    });
   }
 
   /**
@@ -302,27 +322,37 @@ export class RelayClient {
    * @param {object} [options.body]
    * @param {Record<string, string | number | null | undefined>} [options.query]
    * @param {boolean} [options.retry]
+   * @param {number} [options.timeoutMs]
+   * @param {number} [options.attempts]
    * @returns {Promise<any>}
    */
-  async #request(method, pathname, { token = '', body, query = {}, retry = false } = {}) {
+  async #request(method, pathname, {
+    token = '',
+    body,
+    query = {},
+    retry = false,
+    timeoutMs = this.#timeoutMs,
+    attempts = this.#retryAttempts,
+  } = {}) {
     if (typeof this.#fetchImpl !== 'function') {
       throw new RelayError('Браузер не поддерживает сетевые запросы.', {
         code: 'fetch_unavailable',
       });
     }
 
+    const maxAttempts = Math.max(1, Number.isFinite(attempts) ? attempts : 1);
     let lastError = null;
 
-    for (let attempt = 0; attempt < this.#retryAttempts; attempt += 1) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        return await this.#requestOnce(method, pathname, { token, body, query });
+        return await this.#requestOnce(method, pathname, { token, body, query, timeoutMs });
       } catch (error) {
         lastError = error;
 
         const canRetry = retry
           && error instanceof RelayError
           && error.retryable
-          && attempt < this.#retryAttempts - 1;
+          && attempt < maxAttempts - 1;
 
         if (!canRetry) {
           throw error;
@@ -341,7 +371,12 @@ export class RelayClient {
    * @param {object} options
    * @returns {Promise<any>}
    */
-  async #requestOnce(method, pathname, { token = '', body, query = {} } = {}) {
+  async #requestOnce(method, pathname, {
+    token = '',
+    body,
+    query = {},
+    timeoutMs = this.#timeoutMs,
+  } = {}) {
     const url = this.#buildUrl(pathname, query);
     const headers = { Accept: 'application/json' };
     const init = {
@@ -368,7 +403,7 @@ export class RelayClient {
       init.signal = controller.signal;
       timer = setTimeout(() => {
         controller.abort();
-      }, this.#timeoutMs);
+      }, timeoutMs);
     }
 
     let response;

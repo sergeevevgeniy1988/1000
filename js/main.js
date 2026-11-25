@@ -1,4 +1,5 @@
 import { GAME_EVENTS, TARGET_SCORE } from './core/constants.js';
+import { RELAY_BASE_URL } from './config.js';
 import { RelayClient } from './net/relay-client.js';
 import {
   NetworkLobby,
@@ -323,7 +324,7 @@ function bootstrap() {
     openingNetwork = true;
     controller.pause();
 
-    const relay = new RelayClient();
+    const relay = new RelayClient({ baseUrl: RELAY_BASE_URL });
     const lobby = new NetworkLobby({
       relay,
       sessionStorage: getWebStorage('sessionStorage'),

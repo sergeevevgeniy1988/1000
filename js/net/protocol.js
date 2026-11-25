@@ -30,6 +30,14 @@ export const RETRY_ATTEMPTS = 3;
 export const RETRY_BASE_DELAY_MS = 300;
 
 /**
+ * Health check timing. A Render Free instance wakes up from sleep in about a
+ * minute, so the health request waits much longer than a game request and is
+ * attempted twice; game transports keep their own shorter timings.
+ */
+export const HEALTH_TIMEOUT_MS = 30000;
+export const HEALTH_RETRY_ATTEMPTS = 2;
+
+/**
  * Guest-side timing. Actions are queued over HTTP and the host confirms them
  * with the next state change; polls back off while the relay is unreachable.
  */

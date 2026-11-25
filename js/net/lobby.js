@@ -17,9 +17,9 @@ import { RelayError } from './relay-client.js';
  */
 
 export const LAN_INSTRUCTION =
-  'Сервер запущен без сетевого режима. Закройте его и запустите start-lan.cmd.';
+  'Сервер сетевой игры запущен без сетевого режима. Включите сетевой режим на сервере и проверьте снова.';
 export const SERVER_INSTRUCTION =
-  'Сервер не отвечает. Запустите start-lan.cmd и откройте игру по адресу из окна сервера.';
+  'Сервер сетевой игры не отвечает. Проверьте соединение с интернетом и проверьте снова.';
 export const LOCAL_GAME_AVAILABLE_MESSAGE =
   'Локальная партия остаётся доступной: закройте это окно и играйте как раньше.';
 
@@ -144,13 +144,14 @@ export function getSeatStatus(seat) {
 
 /**
  * Returns a user-facing instruction when the server cannot host a network
- * game. `null` means LAN mode is available.
+ * game. `null` means network mode is available: any relay that reports
+ * `network: true` (Render) or the legacy `lan: true` flag can host a room.
  *
  * @param {object | null | undefined} health
  * @returns {{ ok: false, code: string, message: string, localGameAvailable: boolean } | null}
  */
 export function getHealthInstruction(health) {
-  if (isLanHealth(health)) {
+  if (isLanHealth(health) || (health && health.ok === true && health.network === true)) {
     return null;
   }
 
@@ -1509,7 +1510,7 @@ export async function openNetworkLobbyModal({
 
   const checkHealth = async () => {
     state.issue = null;
-    state.status = '';
+    state.status = 'Проверяем сервер…';
     render();
 
     const health = await lobby.checkHealth();
@@ -1522,6 +1523,7 @@ export async function openNetworkLobbyModal({
     }
 
     state.health = health.health;
+    state.status = '';
 
     if (state.roomCode) {
       const resumed = await lobby.resumeGuest(state.roomCode);
@@ -1559,7 +1561,7 @@ export async function openNetworkLobbyModal({
   modal = openModal({
     kind: 'network-lobby',
     title: 'Сетевая игра',
-    subtitle: 'Комната в локальной сети',
+    subtitle: 'Сетевая комната',
     body,
     dismissible: true,
     wide: true,
