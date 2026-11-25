@@ -1,10 +1,10 @@
 import { randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 /**
- * In-memory room model for the relay. Rooms hold seats, a lobby version and
- * presence timestamps; nothing is persisted and there are no external
- * dependencies. Stage 1 exposes creation, joining and the lobby snapshot; the
- * game transport (publish/poll/action) builds on the same room objects.
+ * In-memory room model for the relay. Rooms hold seats, a lobby version, the
+ * authoritative game transport (publish snapshots, action queue, public log and
+ * targeted messages) and presence timestamps; nothing is persisted and there
+ * are no external dependencies.
  */
 
 /** Seats in clockwise order. The host is always the `human` seat. */
@@ -22,9 +22,22 @@ export const ROOM_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
 export const NAME_MIN_LENGTH = 1;
 export const NAME_MAX_LENGTH = 24;
 
+/** Transport limits shared with the browser client (`js/net/protocol.js`). */
+export const ACTION_ID_MIN_LENGTH = 1;
+export const ACTION_ID_MAX_LENGTH = 64;
+export const ACTION_TYPE_MAX_LENGTH = 64;
+export const MAX_ACTION_QUEUE = 100;
+export const MAX_LOG_ENTRIES = 500;
+export const MAX_PLAYER_MESSAGES = 100;
+export const MAX_VIEW_BYTES = 64 * 1024;
+export const MAX_ACTION_PAYLOAD_BYTES = 8 * 1024;
+export const MAX_LOG_ENTRY_BYTES = 16 * 1024;
+export const MAX_MESSAGE_BYTES = 4 * 1024;
+
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 const ROOM_CODE_ATTEMPTS = 100;
 const TOKEN_BYTES = 32;
+const MAX_ACTION_RECEIPTS = 1000;
 
 /**
  * Error with an HTTP status and a stable machine-readable code. The message is
@@ -96,6 +109,20 @@ export function isValidRoomCode(value) {
 }
 
 /**
+ * Checks an opaque client-generated action id: 1–64 characters without control
+ * characters. The relay never interprets the value beyond deduplication.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isValidActionId(value) {
+  return typeof value === 'string'
+    && value.length >= ACTION_ID_MIN_LENGTH
+    && value.length <= ACTION_ID_MAX_LENGTH
+    && !CONTROL_CHARACTER_PATTERN.test(value);
+}
+
+/**
  * Constant-time string comparison used for room tokens.
  *
  * @param {string} expected
@@ -120,6 +147,67 @@ export function safeEqual(expected, provided) {
 /** @returns {string} */
 function createToken() {
   return randomBytes(TOKEN_BYTES).toString('base64url');
+}
+
+/**
+ * Serialized byte size of an opaque JSON value. A value that cannot be
+ * serialized is treated as oversized, which safely rejects it.
+ *
+ * @param {unknown} value
+ * @returns {number}
+ */
+function measureBytes(value) {
+  try {
+    const json = JSON.stringify(value);
+
+    return typeof json === 'string' ? Buffer.byteLength(json, 'utf8') : Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} code
+ * @param {string} message
+ * @returns {boolean}
+ */
+function readOptionalBoolean(value, code, message) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (typeof value !== 'boolean') {
+    throw new RelayError(code, message, 400);
+  }
+
+  return true;
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} code
+ * @param {string} message
+ * @returns {boolean}
+ */
+function readOptionalNonNegativeInt(value, code, message) {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RelayError(code, message, 400);
+  }
+
+  return true;
 }
 
 /**
@@ -225,6 +313,169 @@ export function createRelay({
   }
 
   /**
+   * @param {object} room
+   * @param {number} index
+   * @returns {number}
+   */
+  function seatLastSeen(room, index) {
+    return index === 0 ? room.hostLastSeen : room.players[index].lastSeen;
+  }
+
+  /**
+   * Refreshes one seat's activity timestamp. Host activity also refreshes the
+   * room TTL (`hostLastSeen`); the caller must have passed the TTL check first.
+   *
+   * @param {object} room
+   * @param {number} index
+   * @returns {void}
+   */
+  function touchPresence(room, index) {
+    const at = now();
+
+    if (index === 0) {
+      room.hostLastSeen = at;
+    }
+
+    room.players[index].lastSeen = at;
+  }
+
+  /**
+   * Recomputes the `connected` flag of every occupied seat and bumps the lobby
+   * version when at least one flag changed. This is what makes presence changes
+   * visible to the host without a dedicated polling channel.
+   *
+   * @param {object} room
+   * @returns {boolean} True when the lobby version changed.
+   */
+  function reconcilePresence(room) {
+    const at = now();
+    let changed = false;
+
+    for (let index = 0; index < MAX_PLAYERS; index += 1) {
+      const player = room.players[index];
+      const connected = player !== null && at - seatLastSeen(room, index) <= presenceTimeoutMs;
+
+      if (room.presence[index] !== connected) {
+        room.presence[index] = connected;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      bumpLobby(room);
+    }
+
+    return changed;
+  }
+
+  /**
+   * @param {unknown} token
+   * @param {'missing' | 'invalid'} reason
+   * @returns {never}
+   */
+  function throwTokenError(token, reason) {
+    if (reason === 'missing') {
+      throw new RelayError('missing_token', 'Нужен заголовок X-Room-Token.', 401);
+    }
+
+    throw new RelayError('invalid_token', 'Токен комнаты недействителен.', 401);
+  }
+
+  /**
+   * Finds the occupied seat that owns a token, or `null`. Used to tell a
+   * missing/unknown token (401) from a valid token on the wrong route (403).
+   *
+   * @param {object} room
+   * @param {string} token
+   * @returns {{ index: number, seat: string, player: object } | null}
+   */
+  function findSeatByToken(room, token) {
+    for (let index = 0; index < MAX_PLAYERS; index += 1) {
+      const player = room.players[index];
+
+      if (player !== null && safeEqual(player.token, token)) {
+        return { index, seat: player.seat, player };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Host authorization by token. Uses a constant-time comparison. A valid guest
+   * token on a host-only route is a 403, not an authentication failure.
+   *
+   * @param {object} room
+   * @param {unknown} token
+   * @returns {object} The host player record.
+   */
+  function requireHost(room, token) {
+    if (typeof token !== 'string' || token.length === 0) {
+      throwTokenError(token, 'missing');
+    }
+
+    if (safeEqual(room.hostToken, token)) {
+      return room.players[0];
+    }
+
+    if (findSeatByToken(room, token) !== null) {
+      throw new RelayError('not_host', 'Действие доступно только хосту.', 403);
+    }
+
+    throwTokenError(token, 'invalid');
+  }
+
+  /**
+   * Guest authorization by token. Only occupied guest seats are accepted, so a
+   * kicked guest token stops working immediately. A valid host token is a 403.
+   *
+   * @param {object} room
+   * @param {unknown} token
+   * @returns {{ index: number, seat: string, player: object }}
+   */
+  function requireGuest(room, token) {
+    if (typeof token !== 'string' || token.length === 0) {
+      throwTokenError(token, 'missing');
+    }
+
+    for (let index = 1; index < MAX_PLAYERS; index += 1) {
+      const player = room.players[index];
+
+      if (player !== null && safeEqual(player.token, token)) {
+        return { index, seat: player.seat, player };
+      }
+    }
+
+    if (safeEqual(room.hostToken, token)) {
+      throw new RelayError('not_guest', 'Действие доступно только гостю.', 403);
+    }
+
+    throwTokenError(token, 'invalid');
+  }
+
+  /**
+   * Any-seat authorization by token, used by the player poll where the host is
+   * also allowed to read its own view.
+   *
+   * @param {object} room
+   * @param {unknown} token
+   * @returns {{ index: number, seat: string, player: object }}
+   */
+  function requireSeat(room, token) {
+    if (typeof token !== 'string' || token.length === 0) {
+      throwTokenError(token, 'missing');
+    }
+
+    const seat = findSeatByToken(room, token);
+
+    if (seat !== null) {
+      return seat;
+    }
+
+    throwTokenError(token, 'invalid');
+  }
+
+  /**
    * Case-insensitive duplicate check across occupied seats.
    *
    * @param {object} room
@@ -262,7 +513,7 @@ export function createRelay({
         };
       }
 
-      const lastSeen = seat === HOST_SEAT ? room.hostLastSeen : player.lastSeen;
+      const lastSeen = seatLastSeen(room, index);
 
       return {
         playerId: seat,
@@ -335,11 +586,23 @@ export function createRelay({
         null,
         null,
       ],
+      presence: [true, false, false],
       lobbyVersion: 1,
       hostLastSeen: createdAt,
       createdAt,
       closedAt: null,
       started: false,
+      publishVersion: 0,
+      views: {},
+      viewVersion: 0,
+      log: [],
+      logEpoch: 0,
+      logTotal: 0,
+      messages: { human: [], alice: [], boris: [] },
+      messageTotal: { human: 0, alice: 0, boris: 0 },
+      actions: [],
+      actionSeq: 0,
+      actionReceipts: new Map(),
     };
 
     rooms.set(code, room);
@@ -387,6 +650,7 @@ export function createRelay({
       joinedAt,
       lastSeen: joinedAt,
     };
+    room.presence[index] = true;
     bumpLobby(room);
 
     return {
@@ -395,6 +659,429 @@ export function createRelay({
       token,
       lobby: getLobby(room),
     };
+  }
+
+  /**
+   * Stores one host snapshot. Versions are monotonic; repeating the current
+   * version is an idempotent no-op so a retried publish never duplicates log
+   * entries or messages. An older version is rejected with `stale_version`.
+   *
+   * @param {unknown} code
+   * @param {unknown} token
+   * @param {object} body
+   * @returns {{ ok: true, version: number, lobbyVersion: number }}
+   */
+  function publish(code, token, body) {
+    const room = requireActiveRoom(code);
+    requireHost(room, token);
+
+    const request = isPlainObject(body) ? body : {};
+    const version = request.version;
+
+    if (!Number.isInteger(version) || version < 1) {
+      throw new RelayError('bad_version', 'Нужен номер версии (целое число от 1).', 400);
+    }
+
+    if (version < room.publishVersion) {
+      throw new RelayError('stale_version', 'Уже опубликована более новая версия.', 409);
+    }
+
+    if (version === room.publishVersion) {
+      return { ok: true, version: room.publishVersion, lobbyVersion: room.lobbyVersion };
+    }
+
+    const gameReset = request.gameReset;
+    const hasGameReset = readOptionalBoolean(
+      gameReset,
+      'bad_publish',
+      'gameReset должен быть логическим значением.',
+    );
+    const hasLogEpoch = readOptionalNonNegativeInt(
+      request.logEpoch,
+      'bad_publish',
+      'logEpoch должен быть целым неотрицательным числом.',
+    );
+    const hasStarted = readOptionalBoolean(
+      request.started,
+      'bad_publish',
+      'started должен быть логическим значением.',
+    );
+
+    let views = null;
+
+    if (request.views !== undefined && request.views !== null) {
+      if (!isPlainObject(request.views)) {
+        throw new RelayError('bad_publish', 'views должен быть объектом.', 400);
+      }
+
+      views = {};
+
+      for (const seat of SEAT_IDS) {
+        if (!Object.hasOwn(request.views, seat)) {
+          continue;
+        }
+
+        const view = request.views[seat];
+
+        if (measureBytes(view) > MAX_VIEW_BYTES) {
+          throw new RelayError('bad_publish', 'Снимок стола слишком большой.', 400);
+        }
+
+        views[seat] = view;
+      }
+    }
+
+    let logEntries = null;
+
+    if (request.log !== undefined && request.log !== null) {
+      if (!Array.isArray(request.log)) {
+        throw new RelayError('bad_publish', 'log должен быть массивом.', 400);
+      }
+
+      if (request.log.length > MAX_LOG_ENTRIES) {
+        throw new RelayError('bad_publish', 'Слишком много записей журнала.', 400);
+      }
+
+      for (const entry of request.log) {
+        if (measureBytes(entry) > MAX_LOG_ENTRY_BYTES) {
+          throw new RelayError('bad_publish', 'Запись журнала слишком большая.', 400);
+        }
+      }
+
+      logEntries = request.log;
+    }
+
+    let messageItems = null;
+
+    if (request.messages !== undefined && request.messages !== null) {
+      if (!isPlainObject(request.messages)) {
+        throw new RelayError('bad_publish', 'messages должен быть объектом.', 400);
+      }
+
+      messageItems = {};
+
+      for (const seat of SEAT_IDS) {
+        if (!Object.hasOwn(request.messages, seat)) {
+          continue;
+        }
+
+        const list = request.messages[seat];
+
+        if (!Array.isArray(list)) {
+          throw new RelayError('bad_publish', 'Каждое значение messages должно быть массивом.', 400);
+        }
+
+        if (list.length > MAX_PLAYER_MESSAGES) {
+          throw new RelayError('bad_publish', 'Слишком много сообщений для места.', 400);
+        }
+
+        for (const payload of list) {
+          if (measureBytes(payload) > MAX_MESSAGE_BYTES) {
+            throw new RelayError('bad_publish', 'Сообщение игроку слишком большое.', 400);
+          }
+        }
+
+        messageItems[seat] = list;
+      }
+    }
+
+    if (hasGameReset && gameReset) {
+      room.logEpoch += 1;
+      room.log = [];
+      room.logTotal = 0;
+    } else if (hasLogEpoch && request.logEpoch !== room.logEpoch) {
+      room.logEpoch = request.logEpoch;
+      room.log = [];
+      room.logTotal = 0;
+    }
+
+    if (views !== null) {
+      for (const seat of SEAT_IDS) {
+        if (Object.hasOwn(views, seat)) {
+          room.views[seat] = views[seat];
+        }
+      }
+    }
+
+    if (hasStarted && request.started !== room.started) {
+      room.started = request.started;
+      bumpLobby(room);
+    }
+
+    if (logEntries !== null) {
+      for (const entry of logEntries) {
+        room.logTotal += 1;
+        room.log.push({ seq: room.logTotal, entry });
+      }
+
+      if (room.log.length > MAX_LOG_ENTRIES) {
+        room.log.splice(0, room.log.length - MAX_LOG_ENTRIES);
+        // Guests must drop deltas that predate a trimmed log.
+        room.logEpoch += 1;
+      }
+    }
+
+    if (messageItems !== null) {
+      for (const seat of SEAT_IDS) {
+        if (!Object.hasOwn(messageItems, seat)) {
+          continue;
+        }
+
+        const queue = room.messages[seat];
+
+        for (const payload of messageItems[seat]) {
+          room.messageTotal[seat] += 1;
+          queue.push({ seq: room.messageTotal[seat], payload });
+        }
+
+        if (queue.length > MAX_PLAYER_MESSAGES) {
+          queue.splice(0, queue.length - MAX_PLAYER_MESSAGES);
+        }
+      }
+    }
+
+    room.publishVersion = version;
+    room.viewVersion = version;
+
+    touchPresence(room, 0);
+    reconcilePresence(room);
+
+    return { ok: true, version: room.publishVersion, lobbyVersion: room.lobbyVersion };
+  }
+
+  /**
+   * Returns queued guest actions with `seq > actionSince` and, when
+   * `lobbySince < lobbyVersion`, the current lobby snapshot.
+   *
+   * @param {unknown} code
+   * @param {unknown} token
+   * @param {{ actionSince?: number, lobbySince?: number }} [cursor]
+   * @returns {{ actions: object[], cursor: number, lobbyVersion: number, lobby?: object }}
+   */
+  function hostPoll(code, token, { actionSince = 0, lobbySince = 0 } = {}) {
+    const room = requireActiveRoom(code);
+    requireHost(room, token);
+
+    touchPresence(room, 0);
+    reconcilePresence(room);
+
+    const actions = room.actions
+      .filter((action) => action.seq > actionSince)
+      .sort((left, right) => left.seq - right.seq);
+
+    const state = {
+      actions,
+      cursor: room.actionSeq,
+      lobbyVersion: room.lobbyVersion,
+    };
+
+    if (lobbySince < room.lobbyVersion) {
+      state.lobby = getLobby(room);
+    }
+
+    return state;
+  }
+
+  /**
+   * Returns the personal view of one seat plus log and message deltas. A guest
+   * never receives another seat's view or token.
+   *
+   * @param {unknown} code
+   * @param {unknown} token
+   * @param {{ viewSince?: number, logSince?: number, logEpoch?: number, messageSince?: number }} [cursor]
+   * @returns {object}
+   */
+  function playerPoll(code, token, {
+    viewSince = 0,
+    logSince = 0,
+    logEpoch = 0,
+    messageSince = 0,
+  } = {}) {
+    const room = requireActiveRoom(code);
+    const seat = requireSeat(room, token);
+
+    touchPresence(room, seat.index);
+    reconcilePresence(room);
+
+    const state = {
+      lobby: getLobby(room),
+      started: room.started,
+      viewVersion: room.viewVersion,
+      logEpoch: room.logEpoch,
+      logTotal: room.logTotal,
+      messageTotal: room.messageTotal[seat.seat],
+      log: logEpoch !== room.logEpoch
+        ? room.log.map((entry) => entry)
+        : room.log.filter((entry) => entry.seq > logSince),
+      messages: room.messages[seat.seat].filter((message) => message.seq > messageSince),
+    };
+
+    if (viewSince < room.viewVersion && Object.hasOwn(room.views, seat.seat)) {
+      state.view = room.views[seat.seat];
+    }
+
+    return state;
+  }
+
+  /**
+   * Queues one guest action. `playerId` is derived from the token; any client
+   * field is ignored. A retried `actionId` returns its original `seq`.
+   *
+   * @param {unknown} code
+   * @param {unknown} token
+   * @param {{ actionId?: unknown, type?: unknown, payload?: unknown }} [action]
+   * @returns {{ ok: true, seq: number }}
+   */
+  function addAction(code, token, action = {}) {
+    const room = requireActiveRoom(code);
+    const guest = requireGuest(room, token);
+
+    if (!room.started) {
+      throw new RelayError('room_started', 'Партия ещё не началась.', 409);
+    }
+
+    const request = isPlainObject(action) ? action : {};
+
+    if (!isValidActionId(request.actionId)) {
+      throw new RelayError('bad_action', 'Некорректный идентификатор действия.', 400);
+    }
+
+    if (
+      typeof request.type !== 'string'
+      || request.type.length === 0
+      || request.type.length > ACTION_TYPE_MAX_LENGTH
+      || CONTROL_CHARACTER_PATTERN.test(request.type)
+    ) {
+      throw new RelayError('bad_action', 'Некорректный тип действия.', 400);
+    }
+
+    let payload = request.payload;
+
+    if (payload === undefined || payload === null) {
+      payload = {};
+    }
+
+    if (!isPlainObject(payload)) {
+      throw new RelayError('bad_action', 'Тело действия должно быть объектом.', 400);
+    }
+
+    if (measureBytes(payload) > MAX_ACTION_PAYLOAD_BYTES) {
+      throw new RelayError('bad_action', 'Тело действия слишком большое.', 400);
+    }
+
+    const receiptKey = `${guest.seat}\u0000${request.actionId}`;
+    const previousSeq = room.actionReceipts.get(receiptKey);
+
+    if (previousSeq !== undefined) {
+      return { ok: true, seq: previousSeq };
+    }
+
+    if (room.actions.length >= MAX_ACTION_QUEUE) {
+      throw new RelayError('action_queue_full', 'Очередь действий переполнена.', 429);
+    }
+
+    room.actionSeq += 1;
+
+    room.actions.push({
+      seq: room.actionSeq,
+      playerId: guest.seat,
+      actionId: request.actionId,
+      type: request.type,
+      payload,
+    });
+
+    room.actionReceipts.set(receiptKey, room.actionSeq);
+
+    if (room.actionReceipts.size > MAX_ACTION_RECEIPTS) {
+      room.actionReceipts.delete(room.actionReceipts.keys().next().value);
+    }
+
+    touchPresence(room, guest.index);
+
+    return { ok: true, seq: room.actionSeq };
+  }
+
+  /**
+   * Frees a guest seat, drops that seat's actions and invalidates its token.
+   *
+   * @param {object} room
+   * @param {number} index
+   * @returns {void}
+   */
+  function releaseSeat(room, index) {
+    const seat = SEAT_IDS[index];
+
+    room.players[index] = null;
+    room.presence[index] = false;
+    delete room.views[seat];
+    room.messages[seat] = [];
+    room.messageTotal[seat] = 0;
+
+    room.actions = room.actions.filter((action) => action.playerId !== seat);
+
+    for (const key of room.actionReceipts.keys()) {
+      if (key.startsWith(`${seat}\u0000`)) {
+        room.actionReceipts.delete(key);
+      }
+    }
+
+    bumpLobby(room);
+  }
+
+  /**
+   * @param {unknown} code
+   * @param {unknown} token
+   * @param {unknown} playerId
+   * @returns {{ ok: true, lobby: object }}
+   */
+  function kick(code, token, playerId) {
+    const room = requireActiveRoom(code);
+    requireHost(room, token);
+
+    if (typeof playerId !== 'string' || !GUEST_SEATS.includes(playerId)) {
+      throw new RelayError('not_guest', 'Исключить можно только гостя.', 403);
+    }
+
+    const index = SEAT_IDS.indexOf(playerId);
+
+    if (!room.players[index]) {
+      throw new RelayError('not_guest', 'Это место уже свободно.', 403);
+    }
+
+    releaseSeat(room, index);
+
+    return { ok: true, lobby: getLobby(room) };
+  }
+
+  /**
+   * @param {unknown} code
+   * @param {unknown} token
+   * @returns {{ ok: true }}
+   */
+  function close(code, token) {
+    const room = requireActiveRoom(code);
+    requireHost(room, token);
+
+    if (room.closedAt === null) {
+      markClosed(room);
+      bumpLobby(room);
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * @param {unknown} code
+   * @param {unknown} token
+   * @returns {{ ok: true, lobby: object }}
+   */
+  function leave(code, token) {
+    const room = requireActiveRoom(code);
+    const guest = requireGuest(room, token);
+
+    releaseSeat(room, guest.index);
+
+    return { ok: true, lobby: getLobby(room) };
   }
 
   const timer = setInterval(cleanup, cleanupIntervalMs);
@@ -408,6 +1095,13 @@ export function createRelay({
     joinRoom,
     getLobby,
     cleanup,
+    publish,
+    hostPoll,
+    playerPoll,
+    addAction,
+    kick,
+    close,
+    leave,
     /** Stops the periodic cleanup timer. */
     stop() {
       clearInterval(timer);
@@ -416,9 +1110,13 @@ export function createRelay({
     get size() {
       return rooms.size;
     },
-    /** @internal Stage 2 transport uses these. */
+    /** @internal Transport helpers exported for tests and future stages. */
     requireActiveRoom,
+    requireHost,
+    requireGuest,
     bumpLobby,
     markClosed,
+    touchPresence,
+    reconcilePresence,
   };
 }

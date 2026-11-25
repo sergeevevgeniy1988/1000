@@ -13,3 +13,20 @@ Added the stage-1 relay: `server/config.js` (validated env config, package versi
 7. `server/index.js` serves static from the repository root resolved via `import.meta.url`, so it works regardless of the current directory.
 
 ---
+
+Item **2** done and marked `[x]`.
+
+## What I did
+Extended `server/relay.js` with the full game transport and room lifecycle: timing-safe host/guest/seat authorization (`missing_token`, `invalid_token`, `not_host`, `not_guest`), presence refresh on every successful poll/publish/action, `connected` reconciliation with `lobbyVersion` bumps, `publish` (monotonic versions, idempotent duplicate, `stale_version`, size limits, `gameReset`/`logEpoch` log reset, `{seq, entry}` log and `{seq, payload}` messages, per-seat views and `viewVersion`), `hostPoll` (action queue window + conditional lobby), `playerPoll` (own view, log epoch/delta, targeted messages only), `addAction` (token-derived `playerId`, `actionId` validation, `playerId + actionId` receipts, 100-entry queue, 429 `action_queue_full`), plus `kick`, `close` and `leave` freeing seats, dropping their actions/views/messages and invalidating tokens. Reworked `server/http.js` into one room-route dispatcher for join/publish/host/player/action/kick/close/leave with per-route `Allow` headers, strict `bad_query` cursor parsing, tokens read only from `X-Room-Token`, and the stage-1 CORS/JSON/static behavior preserved.
+
+## Findings (important for later items)
+1. `publish` returns exactly `{ ok, version, lobbyVersion }`; a repeated current version is a no-op that never re-applies log/messages/views, and any lower version is 409 `stale_version`. The host session already handles that 409 by bumping its local version.
+2. `hostPoll` returns `lobby` only when `lobbySince < lobbyVersion` and always returns `cursor = actionSeq`; actions are filtered to `seq > actionSince` and sorted ascending.
+3. `playerPoll` accepts any occupied seat token (host included) and never returns another seat's view; on `logEpoch` mismatch it returns the whole current log, otherwise `seq > logSince`.
+4. A valid token used on the wrong route is 403 (`not_host`/`not_guest`); an unknown or removed-seat token is 401 `invalid_token`. This is what makes a kicked guest see 401 and a guest calling `close` see 403.
+5. Kick is allowed after the game started (the stage-2 gate kicks `alice` after `started=true`); the old PowerShell relay refused that, so do not reintroduce a `room_started` guard there.
+6. Room fields for stage 3: `publishVersion`, `viewVersion`, `views`, `log`, `logEpoch`, `logTotal`, `messages`, `messageTotal`, `actions`, `actionSeq`, `presence`. Limits live as exported constants in `server/relay.js` (100 actions, 500 log entries, 100 messages per seat, 64 KB view).
+7. Transport error codes in use: 400 `bad_room_code`/`bad_version`/`bad_publish`/`bad_action`/`bad_name`/`bad_json`/`bad_query`, 401 `missing_token`/`invalid_token`, 403 `bad_origin`/`not_host`/`not_guest`, 404 `room_not_found`, 409 `room_started`/`room_full`/`name_taken`/`stale_version`, 410 `room_closed`, 413 `body_too_large`, 429 `action_queue_full`/`room_limit`, 405 with `Allow`.
+8. Both plan gates (`stage 2` lifecycle and `ROOM_TTL_SECONDS=2`) print `OK`, the stage-1 gate still prints `OK`, and an extra local check confirmed duplicate publish, `gameReset`, kick/leave token invalidation, wrong-role 403s and CORS headers on errors.
+
+---

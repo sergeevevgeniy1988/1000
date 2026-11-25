@@ -13,6 +13,31 @@ const API_PREFIX = '/api/';
 const ALLOWED_METHODS = 'GET, POST, OPTIONS';
 const ALLOWED_HEADERS = 'Content-Type, X-Room-Token';
 const PREFLIGHT_MAX_AGE = '600';
+const TOKEN_HEADER = 'x-room-token';
+const ROOM_ROUTE_PATTERN = /^\/api\/rooms\/([^/]+)\/([a-z]+)$/;
+const UNSIGNED_INT_PATTERN = /^\d{1,15}$/;
+
+const ROOM_ROUTE_METHODS = Object.freeze({
+  join: 'POST',
+  publish: 'POST',
+  host: 'GET',
+  player: 'GET',
+  action: 'POST',
+  kick: 'POST',
+  close: 'POST',
+  leave: 'POST',
+});
+
+const ROOM_ROUTE_ALLOW = Object.freeze({
+  join: 'POST, OPTIONS',
+  publish: 'POST, OPTIONS',
+  host: 'GET, OPTIONS',
+  player: 'GET, OPTIONS',
+  action: 'POST, OPTIONS',
+  kick: 'POST, OPTIONS',
+  close: 'POST, OPTIONS',
+  leave: 'POST, OPTIONS',
+});
 
 const STATIC_CONTENT_TYPES = Object.freeze({
   '.html': 'text/html; charset=utf-8',
@@ -301,6 +326,42 @@ function methodNotAllowed(res, allow) {
 }
 
 /**
+ * Reads the room token from the dedicated header. Tokens in the query string
+ * are ignored on purpose, so a token never ends up in a URL or an access log.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {string}
+ */
+function readRoomToken(req) {
+  const raw = req.headers[TOKEN_HEADER];
+
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/**
+ * Reads a non-negative integer cursor from the query string. A missing value
+ * means `0`; anything else must be plain digits, so `?actionSince=oops` is a
+ * `bad_query` instead of a silently ignored cursor.
+ *
+ * @param {URL} url
+ * @param {string} name
+ * @returns {number}
+ */
+function readQueryInt(url, name) {
+  const raw = url.searchParams.get(name);
+
+  if (raw === null) {
+    return 0;
+  }
+
+  if (!UNSIGNED_INT_PATTERN.test(raw)) {
+    throw new RelayError('bad_query', `Параметр «${name}» должен быть целым числом.`, 400);
+  }
+
+  return Number(raw);
+}
+
+/**
  * Creates the relay HTTP server. The caller owns `listen()` and shutdown.
  *
  * @param {object} options
@@ -378,17 +439,86 @@ export function createHttpServer({ config, relay, rootDir, logger = null }) {
         return;
       }
 
-      const joinMatch = /^\/api\/rooms\/([^/]+)\/join$/.exec(pathname);
+      const roomMatch = ROOM_ROUTE_PATTERN.exec(pathname);
 
-      if (joinMatch) {
-        if (method !== 'POST') {
-          methodNotAllowed(res, 'POST, OPTIONS');
+      if (roomMatch) {
+        const code = decodeURIComponent(roomMatch[1]);
+        const route = roomMatch[2];
+        const expectedMethod = ROOM_ROUTE_METHODS[route];
+        const allow = ROOM_ROUTE_ALLOW[route];
+
+        if (!expectedMethod) {
+          sendError(res, 404, 'not_found', 'Эндпоинт не найден.');
           return;
         }
 
-        const body = await readJsonBody(req, config.maxBodyBytes);
-        const joined = relay.joinRoom(decodeURIComponent(joinMatch[1]), body.name);
-        sendJson(res, 200, { ok: true, ...joined });
+        if (method !== expectedMethod) {
+          methodNotAllowed(res, allow);
+          return;
+        }
+
+        if (route === 'join') {
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          const joined = relay.joinRoom(code, body.name);
+          sendJson(res, 200, { ok: true, ...joined });
+          return;
+        }
+
+        if (route === 'publish') {
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          const result = relay.publish(code, readRoomToken(req), body);
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (route === 'host') {
+          const result = relay.hostPoll(code, readRoomToken(req), {
+            actionSince: readQueryInt(url, 'actionSince'),
+            lobbySince: readQueryInt(url, 'lobbySince'),
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (route === 'player') {
+          const result = relay.playerPoll(code, readRoomToken(req), {
+            viewSince: readQueryInt(url, 'viewSince'),
+            logSince: readQueryInt(url, 'logSince'),
+            logEpoch: readQueryInt(url, 'logEpoch'),
+            messageSince: readQueryInt(url, 'messageSince'),
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (route === 'action') {
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          const result = relay.addAction(code, readRoomToken(req), {
+            actionId: body.actionId,
+            type: body.type,
+            payload: body.payload,
+          });
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (route === 'kick') {
+          const body = await readJsonBody(req, config.maxBodyBytes);
+          const result = relay.kick(code, readRoomToken(req), body.playerId);
+          sendJson(res, 200, result);
+          return;
+        }
+
+        if (route === 'close') {
+          await readJsonBody(req, config.maxBodyBytes);
+          const result = relay.close(code, readRoomToken(req));
+          sendJson(res, 200, result);
+          return;
+        }
+
+        await readJsonBody(req, config.maxBodyBytes);
+        const result = relay.leave(code, readRoomToken(req));
+        sendJson(res, 200, result);
         return;
       }
 
